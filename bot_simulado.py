@@ -44,8 +44,8 @@ def inicializar_okx():
             logger.info("🔧 Configurando cuenta de OKX en modo Multi-Moneda...")
             exchange.private_post_account_set_account_position_mode({'acctLv': '2'})
             logger.info("✅ Modo Multi-Moneda verificado и activado exitosamente.")
-        except Exception as e:
-            logger.warning(f"⚠️ No se pudo forzar el modo de cuenta: {e}.")
+        except Exception:
+            logger.warning("⚠️ No se pudo forzar el modo de cuenta.")
         return exchange
     else:
         return ccxt.okx(config)
@@ -200,9 +200,9 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                     moneda_actual = quote
                     
             time.sleep(0.05)
-        logger.info("✅ Цикълът приключи.")
-    except Exception as e:
-        logger.error(f"❌ Грешка при изпълнение: {e}")
+        logger.info("✅ Ciclo finalizado.")
+    except Exception:
+        logger.error("❌ Error en ejecución real.")
 
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
@@ -240,12 +240,13 @@ def ejecutar_bot():
                     else:
                         logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
                 else:
-                    logger.info("⏳ Анализ на пазара: Изчакване на спредове...")
-                
-            except Exception as e:
-                logger.error(f"Error en ciclo activo: {e}")
-                
+                    logger.info("⏳ Esperando spreads...")
+            except Exception:
+                pass
             time.sleep(0.8)
 
     except Exception as e:
         logger.error(f"Fallo crítico inicial: {e}")
+
+if __name__ == "__main__":
+    ejecutar_bot()
