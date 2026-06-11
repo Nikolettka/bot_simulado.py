@@ -5,7 +5,6 @@ import ccxt
 import sys
 import os
 
-# Configuración del flujo de salida limpio hacia stdout para Railway
 root = logging.getLogger()
 if root.handlers:
     for handler in root.handlers:
@@ -20,13 +19,13 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # =====================================================================
-# 🚨 INTERRUPTOR DE SEGURIDAD PRINCIPAL - ¡MANTENIDO EN SIMULADO!
+# 🚨 MODO SIMULADO SEGURO
 # =====================================================================
-MODO_REAL = False  # Dinero falso/simulado. Tu saldo real está 100% a salvo.
+MODO_REAL = False  
 
-# --- CONFIGURACIÓN MATEMÁTICA ---
+# --- CONFIGURACIÓN MATEMÁTICA AGRESIVA ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.15              # Filtro bajado a 0.15% para capturar más oportunidades
+MIN_PROFIT = 0.02              # Bajado a 0.02% para forzar trades constantes
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
@@ -35,11 +34,9 @@ TOTAL_TRADES = 4
 DICCIONARIO_MERCADOS = {}
 
 def inicializar_okx():
-    config = {'enableRateLimit': True}
-    return ccxt.okx(config)
+    return ccxt.okx({'enableRateLimit': True})
 
 def buscar_todos_los_triangulos(markets):
-    """Búsqueda ultra rápida de rutas triangulares usando Grafos y Sets."""
     global DICCIONARIO_MERCADOS
     DICCIONARIO_MERCADOS.clear()
     adjacencia = {}
@@ -49,20 +46,17 @@ def buscar_todos_los_triangulos(markets):
             if not market.get('active', True): continue
             is_spot = market.get('spot', False)
             is_swap = market.get('swap', False)
-            
             quote_usdt = market.get('quote') == 'USDT'
             settle_usdt = market.get('settle') == 'USDT' if is_swap else False
             
             if (is_spot or is_swap) and (quote_usdt or settle_usdt):
                 base = market['base']
                 quote = market['quote']
-                
                 DICCIONARIO_MERCADOS[symbol] = {
                     'base': base,
                     'quote': quote,
                     'type': 'swap' if is_swap else 'spot'
                 }
-                
                 adjacencia.setdefault(base, set()).add((quote, symbol))
                 adjacencia.setdefault(quote, set()).add((base, symbol))
         except Exception:
@@ -133,24 +127,23 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
+                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ¡TRADE SIMULADO DETECTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo Ficticio: ${CAPITAL_SIMULADO:.2f} USDT")
+                        logger.info(f"💰 ¡TRADE SIMULADO! #{TOTAL_TRADES} | Ruta: {mejor_ruta_texto} | Beneficio: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f}")
                     else:
-                        # Te muestra el spread máximo en tiempo real para ver cómo bailan los números cerca de 0.15%
-                        logger.info(f"Esperando spreads... | Mejor Spread actual: {mejor_profit:.4f}% | Objetivo: {MIN_PROFIT}%")
+                        logger.info(f"Monitoreando | Max Spread: {mejor_profit:.4f}% | Objetivo: {MIN_PROFIT}%")
                 else:
-                    logger.info("Esperando spreads...")
+                    logger.info("Esperando datos...")
             except Exception:
                 pass
             time.sleep(0.8)
     except Exception as e:
-        logger.error(f"Fallo crítico inicial: {e}")
+        logger.error(f"Fallo critico inicial: {e}")
 
 if __name__ == "__main__":
     ejecutar_bot()
