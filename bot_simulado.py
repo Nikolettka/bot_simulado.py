@@ -26,7 +26,14 @@ TAKER_FEE         = 0.0010     # 0.10% taker OKX
 MIN_PROFIT        = 0.31       # % mínimo neto para ejecutar
 MAX_PROFIT        = 5.0        # % máximo (filtro anti-stale)
 MAX_TICKER_AGE_MS = 10_000     # 10 s — ticker más viejo = ignorado
-SLEEP_SECONDS     = 0.5        # pausa entre ciclos
+SLEEP_SECONDS     = 2.0        # pausa entre ciclos (2s estable en Railway Trial)
+
+# Solo monedas bridge líquidas — reduce triángulos de ~5000 a ~200
+BRIDGE_COINS = {
+    "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX",
+    "MATIC", "DOT", "LTC", "AVAX", "LINK", "UNI", "ATOM",
+    "OKB", "TON", "NEAR", "FIL", "APT",
+}
 
 # ─────────────────────────────────────────────
 #  ESTADO GLOBAL
@@ -74,6 +81,9 @@ def buscar_triangulos(markets):
     for p1 in por_moneda[inicio]:
         b1, q1 = p1.split("/")
         m1 = b1 if q1 == inicio else q1
+        # Solo bridge coins líquidas — evita escanear miles de altcoins oscuras
+        if m1 not in BRIDGE_COINS:
+            continue
         if m1 not in por_moneda:
             continue
         for p2 in por_moneda[m1]:
