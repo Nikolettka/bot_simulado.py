@@ -19,16 +19,15 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # =====================================================================
-# 🚨 СУПЕР СТАБИЛЕН И ОЛЕКОТЕН СКЕНЕР (ПОДСИГУРЕН ЗА RAILWAY TRIAL)
+# 🚨 СУПЕР СТАБИЛЕН И ОЛЕКОТЕН СКЕНЕР (БЕЗ КЛЮЧОВЕ)
 # =====================================================================
 MODO_REAL = False  
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.02              # Нисък лимит за постоянно хващане на спредове
+MIN_PROFIT = 0.02              # Лимит от 0.02% за постоянни симулирани сделки
 MAX_PROFIT = 5.0      
 CAPITAL_SIMULADO = 50.82  
 TOTAL_TRADES = 4               
 
-# Сканираме само ТОП ликвидните активи, които правят 90% от арбитражните обеми
 DICCIONARIO_MERCADOS = {}
 MONEDAS_TOP = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'USDT']
 
@@ -49,7 +48,6 @@ def buscar_todos_los_triangulos(markets):
             base = market.get('base')
             quote = market.get('quote')
             
-            # Филтрираме само ако и двете валути са в нашия ТОП списък за стабилност
             if base in MONEDAS_TOP and quote in MONEDAS_TOP:
                 DICCIONARIO_MERCADOS[symbol] = {
                     'base': base,
@@ -116,7 +114,6 @@ def ejecutar_bot():
         
         while True:
             try:
-                # Изтегляме цените наведнъж - пакета е малък и OKX няма да ни блокира
                 tickers = exchange.fetch_tickers()
                 resultados_vuelta = []
                 
@@ -126,8 +123,11 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
+                    # КОРЕКЦИЯ: Сортираме по стойността на профита (който е на индекс 2 в туплата)
+                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
+                    
+                    # КОРЕКЦИЯ: Извличаме само индекс [0] (най-добрия резултат), за да няма грешка с разархивирането
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
@@ -141,7 +141,7 @@ def ejecutar_bot():
             except Exception as e:
                 logger.error(f"Грешка в цикъла: {e}")
                 
-            time.sleep(2.0) # Безопасна пауза за поддържане на постоянна връзка
+            time.sleep(2.0) 
     except Exception as e:
         logger.error(f"Критичен срив на старта: {e}")
 
