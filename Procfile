@@ -1,1 +1,2 @@
-worker: python bot_simulado.py
+web: python main.py
+
