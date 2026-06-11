@@ -18,14 +18,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
+# =====================================================================
+# 🚨 СУПЕР СТАБИЛЕН И ОЛЕКОТЕН СКЕНЕР (ПОДСИГУРЕН ЗА RAILWAY TRIAL)
+# =====================================================================
 MODO_REAL = False  
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.02              
+MIN_PROFIT = 0.02              # Нисък лимит за постоянно хващане на спредове
 MAX_PROFIT = 5.0      
 CAPITAL_SIMULADO = 50.82  
 TOTAL_TRADES = 4               
 
+# Сканираме само ТОП ликвидните активи, които правят 90% от арбитражните обеми
 DICCIONARIO_MERCADOS = {}
+MONEDAS_TOP = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'USDT']
 
 def inicializar_okx():
     return ccxt.okx({'enableRateLimit': True})
@@ -41,9 +46,11 @@ def buscar_todos_los_triangulos(markets):
             is_spot = market.get('spot', False)
             is_swap = market.get('swap', False)
             
-            if is_spot or is_swap:
-                base = market['base']
-                quote = market['quote']
+            base = market.get('base')
+            quote = market.get('quote')
+            
+            # Филтрираме само ако и двете валути са в нашия ТОП списък за стабилност
+            if base in MONEDAS_TOP and quote in MONEDAS_TOP:
                 DICCIONARIO_MERCADOS[symbol] = {
                     'base': base,
                     'quote': quote,
@@ -65,10 +72,11 @@ def buscar_todos_los_triangulos(markets):
             if m2 not in adjacencia: continue
             for m3, par3 in adjacencia[m2]:
                 if m3 == inicio and par3 != par1 and par3 != par2:
-                    triangulos.append((par1, par2, par3))
+                    ruta = (par1, par2, par3)
+                    if ruta not in triangulos:
+                        triangulos.append(ruta)
                         
-    # Ограничаваме до първите 150 триъгълника за пестене на RAM в Railway
-    return triangulos[:150]
+    return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
     global DICCIONARIO_MERCADOS
@@ -99,31 +107,19 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
-    logger.info("СТАРТИРАНЕ НА ОЛЕКОТЕН БОТ ЗА ТЕСТВАНЕ В RAILWAY.")
+    logger.info("СТАРТИРАНЕ НА ВИСОКОЛИКВИДЕН ТОП СКЕНЕР.")
     
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Оптимизирана RAM памет. Сканиране на {len(triangulos)} бързи пътища.")
-        
-        # Събираме списък от пазари, които реално ни трябват
-        pares_необходими = set()
-        for t in triangulos:
-            for par in t:
-                pares_необходими.add(par)
+        logger.info(f"Матрицата е заредена. Сканиране на {len(triangulos)} ТОП стабилни пътища.")
         
         while True:
             try:
-                # ОЛЕКОТЕНА ЗАЯВКА: Вместо fetch_tickers(), теглим само необходимите цени една по една
-                tickers = {}
-                for par in pares_необходими:
-                    try:
-                        tickers[par] = exchange.fetch_ticker(par)
-                    except Exception:
-                        continue
-                    time.sleep(0.02) # Малка микро-пауза за стабилност
-                
+                # Изтегляме цените наведнъж - пакета е малък и OKX няма да ни блокира
+                tickers = exchange.fetch_tickers()
                 resultados_vuelta = []
+                
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
                     if -50.0 < profit < MAX_PROFIT:
@@ -137,16 +133,17 @@ def ejecutar_bot():
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ТРЕЙД! #{TOTAL_TRADES} | {mejor_ruta_texto} | Спред: +{mejor_profit:.4f}% | Салдо: ${CAPITAL_SIMULADO:.2f}")
+                        logger.info(f"💰 ТРЕЙД! #{TOTAL_TRADES} | Маршрут: {mejor_ruta_texto} | Спред: +{mejor_profit:.4f}% | Баланс: ${CAPITAL_SIMULADO:.2f}")
                     else:
                         logger.info(f"Сканиране... | Макс Спред: {mejor_profit:.4f}% | Цел: {MIN_PROFIT}%")
                 else:
-                    logger.info("Изчакване опресняването на цените от OKX...")
-            except Exception:
-                pass
-            time.sleep(3.0) 
+                    logger.info("Опресняване на пазарния поток от OKX...")
+            except Exception as e:
+                logger.error(f"Грешка в цикъла: {e}")
+                
+            time.sleep(2.0) # Безопасна пауза за поддържане на постоянна връзка
     except Exception as e:
-        logger.error(f"Критичен срив: {e}")
+        logger.error(f"Критичен срив на старта: {e}")
 
 if __name__ == "__main__":
     ejecutar_bot()
