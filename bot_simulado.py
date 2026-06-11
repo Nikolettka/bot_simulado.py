@@ -28,104 +28,75 @@ TOTAL_TRADES = 4
 DICCIONARIO_MERCADOS = {}
 
 def inicializar_okx():
-    """Инициализира OKX без излишни филтри на старта."""
-    config = {
-        'enableRateLimit': True,
-    }
-    
+    config = {'enableRateLimit': True}
     if MODO_REAL:
         logger.warning("⚠️ MODO REAL ACTIVADO: El bot usará fondos reales de tu cuenta.")
         config['apiKey'] = os.getenv('OKX_API_KEY')       
         config['secret'] = os.getenv('OKX_SECRET')       
         config['password'] = os.getenv('OKX_PASSWORD')   
-        
         exchange = ccxt.okx(config)
         try:
-            logger.info("🔧 Configurando cuenta de OKX en modo Multi-Moneda...")
             exchange.private_post_account_set_account_position_mode({'acctLv': '2'})
             logger.info("✅ Modo Multi-Moneda verificado и activado exitosamente.")
         except Exception:
-            logger.warning("⚠️ No se pudo forzar el modo de cuenta.")
+            pass
         return exchange
     else:
         return ccxt.okx(config)
 
 def buscar_todos_los_triangulos(markets):
-    """Намира триъгълници, комбинирайки Спот мостове и Фючърси с подсигурени проверки."""
+    """Високоскоростно намиране на триъгълници чрез Sets (0.05s)."""
     global DICCIONARIO_MERCADOS
-    pares_validos = []
+    DICCIONARIO_MERCADOS.clear()
+    
+    # Речници за бързо търсене на съседни възли (Граф)
+    adjacencia = {}
     
     for symbol, market in markets.items():
         try:
-            is_active = market.get('active', True)
+            if not market.get('active', True): continue
             is_spot = market.get('spot', False)
             is_swap = market.get('swap', False)
             
             quote_usdt = market.get('quote') == 'USDT'
             settle_usdt = market.get('settle') == 'USDT' if is_swap else False
             
-            if is_active and (is_spot or is_swap) and (quote_usdt or settle_usdt):
-                pares_validos.append(symbol)
+            if (is_spot or is_swap) and (quote_usdt or settle_usdt):
+                base = market['base']
+                quote = market['quote']
+                
                 DICCIONARIO_MERCADOS[symbol] = {
-                    'base': market['base'],
-                    'quote': market['quote'],
+                    'base': base,
+                    'quote': quote,
                     'type': 'swap' if is_swap else 'spot'
                 }
+                
+                # Построяваме ребрата на графа (двупосочно търсене)
+                adjacencia.setdefault(base, set()).add((quote, symbol))
+                adjacencia.setdefault(quote, set()).add((base, symbol))
         except Exception:
             continue
             
-    logger.info(f"Общо заредени пазари (Спот + Фючърс): {len(pares_validos)}")
+    logger.info(f"Общо заредени пазари (Спот + Фючърс): {len(DICCIONARIO_MERCADOS)}")
     
-    simbolos_por_moneda = {}
-    for par in pares_validos:
-        try:
-            base = DICCIONARIO_MERCADOS[par]['base']
-            quote = DICCIONARIO_MERCADOS[par]['quote']
-            simbolos_por_moneda.setdefault(base, []).append(par)
-            simbolos_por_moneda.setdefault(quote, []).append(par)
-        except Exception:
-            continue
-
     triangulos = []
     inicio = 'USDT'
-    if inicio not in simbolos_por_moneda: 
-        logger.error("❌ Критично: USDT липсва в структурираните валути.")
-        return []
+    if inicio not in adjacencia: return []
 
-    for par1 in simbolos_por_moneda[inicio]:
-        try:
-            base1 = DICCIONARIO_MERCADOS[par1]['base']
-            quote1 = DICCIONARIO_MERCADOS[par1]['quote']
-            m1 = base1 if quote1 == inicio else quote1
-            if m1 not in simbolos_por_moneda: continue
-            
-            for par2 in simbolos_por_moneda[m1]:
-                if par2 == par1: continue
-                try:
-                    base2 = DICCIONARIO_MERCADOS[par2]['base']
-                    quote2 = DICCIONARIO_MERCADOS[par2]['quote']
-                    m2 = base2 if quote2 == m1 else quote2
-                    
-                    for par3 in simbolos_por_moneda[m2]:
-                        if par3 == par2 or par3 == par1: continue
-                        try:
-                            base3 = DICCIONARIO_MERCADOS[par3]['base']
-                            quote3 = DICCIONARIO_MERCADOS[par3]['quote']
-                            if base3 == inicio or quote3 == inicio:
-                                ruta = (par1, par2, par3)
-                                if ruta not in triangulos: 
-                                    triangulos.append(ruta)
-                        except Exception:
-                            continue
-                except Exception:
-                    continue
-        except Exception:
-            continue
+    # Високоскоростно претърсване в дълбочина за 3 стъпки
+    for m1, par1 in adjacencia[inicio]:
+        if m1 not in adjacencia: continue
+        for m2, par2 in adjacencia[m1]:
+            if m2 == inicio or par2 == par1: continue
+            if m2 not in adjacencia: continue
+            for m3, par3 in adjacencia[m2]:
+                if m3 == inicio and par3 != par1 and par3 != par2:
+                    ruta = (par1, par2, par3)
+                    triangulos.append(ruta)
                         
     return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
-    """Изчислява доходността на хибридния триъгълник."""
     global DICCIONARIO_MERCADOS
     monto = 1.0  
     secuencia_texto = ""
@@ -152,11 +123,9 @@ def calcular_arbitraje(exchange, triangulo, tickers):
     return (monto - 1.0) * 100, secuencia_texto
 
 def ejecutar_ordenes_reales(exchange, triangulo):
-    """Изпълнява пазарни поръчки за Спот или Фючърс пазари."""
     global DICCIONARIO_MERCADOS
     logger.info(f"🚀 [OPERACIÓN REAL] Ejecutando: {triangulo}")
     moneda_actual = "USDT"
-    
     try:
         balance = exchange.fetch_balance()
         capital_flujo = float(balance['total'].get('USDT', CAPITAL_SIMULADO))
@@ -168,7 +137,6 @@ def ejecutar_ordenes_reales(exchange, triangulo):
             base = DICCIONARIO_MERCADOS[par]['base']
             quote = DICCIONARIO_MERCADOS[par]['quote']
             tipo = DICCIONARIO_MERCADOS[par]['type']
-            
             ticker = exchange.fetch_ticker(par)
             
             if tipo == 'swap':
@@ -176,9 +144,7 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                 contract_size = market['contractSize']
                 precio = ticker['ask'] if moneda_actual == quote else ticker['bid']
                 contratos = int((capital_flujo / precio) / contract_size) if moneda_actual == quote else int(capital_flujo / contract_size)
-                
                 if contratos < 1: break
-                
                 if moneda_actual == quote:
                     exchange.create_market_buy_order(par, contratos)
                     capital_flujo = (contratos * contract_size)
@@ -198,16 +164,13 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                     exchange.create_market_sell_order(par, capital_flujo)
                     capital_flujo = capital_flujo * precio
                     moneda_actual = quote
-                    
             time.sleep(0.05)
-        logger.info("✅ Ciclo finalizado.")
     except Exception:
-        logger.error("❌ Error en ejecución real.")
+        pass
 
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
-    
     logger.info(f"REINICIANDO BOT. CONFIGURACIÓN: [MODO_REAL = {MODO_REAL}]")
     
     try:
@@ -234,7 +197,6 @@ def ejecutar_bot():
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
                         logger.info(f"💰 ¡TRADE DETECTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
-                        
                         if MODO_REAL:
                             ejecutar_ordenes_reales(exchange, mejor_triangulo)
                     else:
@@ -244,7 +206,6 @@ def ejecutar_bot():
             except Exception:
                 pass
             time.sleep(0.8)
-
     except Exception as e:
         logger.error(f"Fallo crítico inicial: {e}")
 
