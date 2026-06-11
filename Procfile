@@ -1,2 +1,2 @@
-web: python bot_simulado.py
 
+worker: python bot_simulado.py
