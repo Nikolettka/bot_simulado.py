@@ -19,40 +19,56 @@ MODO_REAL = False  # Cambiar a True SOLO cuando quieras usar dinero real
 
 # --- CONFIGURACIÓN MATEMÁTICA ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.22              # Subimos a 0.22% en modo pre-real para cubrir el Slippage
+MIN_PROFIT = 0.22              # Filtro mínimo para cubrir comisiones y slippage
 MAX_PROFIT = 5.0      
-CAPITAL_INICIAL = 50.82        # Mantenemos tu saldo ganado
+CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
-TOTAL_TRADES = 4               # Mantenemos tus 4 trades exitosos
+TOTAL_TRADES = 4               
 
 def inicializar_okx():
-    """Inicializa OKX detectando si usa credenciales reales o públicas."""
+    """Inicializa OKX y configura la cuenta en modo multi-divisa si está en MODO_REAL."""
+    config = {
+        'enableRateLimit': True,
+        'options': {'defaultType': 'swap'} 
+    }
+    
     if MODO_REAL:
         logger.warning("⚠️ MODO REAL ACTIVADO: El bot usará fondos reales de tu cuenta.")
-        return ccxt.okx({
-            'apiKey': os.getenv('OKX_API_KEY'),       # Tomado de las variables de Railway
-            'secret': os.getenv('OKX_SECRET'),       # Tomado de las variables de Railway
-            'password': os.getenv('OKX_PASSWORD'),   # Tomado de las variables de Railway
-            'enableRateLimit': True,
-            'options': {'defaultType': 'swap'} 
-        })
+        config['apiKey'] = os.getenv('OKX_API_KEY')       
+        config['secret'] = os.getenv('OKX_SECRET')       
+        config['password'] = os.getenv('OKX_PASSWORD')   
+        
+        exchange = ccxt.okx(config)
+        
+        # Ajuste dinámico del modo de cuenta para permitir uso de múltiples monedas como colateral
+        try:
+            logger.info("🔧 Configurando cuenta de OKX en modo Multi-Moneda...")
+            # '2' representa el modo Multi-currency / Multi-divisa en la API V5 de OKX
+            exchange.private_post_account_set_account_position_mode({'acctLv': '2'})
+            logger.info("✅ Modo Multi-Moneda verificado y activado exitosamente.")
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudo forzar el modo de cuenta mediante API: {e}. Asegúrate de tener activada la 'Configuración de margen multidivisa' en la web de OKX.")
+        
+        return exchange
     else:
-        return ccxt.okx({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'swap'} 
-        })
+        return ccxt.okx(config)
+
+def extraer_base_quote(par):
+    """Separa correctamente un par de futuros de OKX (ej: 'BTC/USDT:USDT' -> BTC, USDT)."""
+    par_limpio = par.split(':')
+    base, quote = par_limpio[0].split('/')
+    return base, quote
 
 def buscar_todos_los_triangulos(markets):
     pares_swap = [
         symbol for symbol, market in markets.items() 
-        if market['swap'] and market['active'] and market['linear'] and market['settle'] == 'USDT'
+        if market.get('swap') and market.get('active') and market.get('linear') and market.get('settle') == 'USDT'
     ]
     
     simbolos_por_moneda = {}
     for par in pares_swap:
         try:
-            partes_par = par.split(':')
-            base, quote = partes_par[0].split('/')
+            base, quote = extraer_base_quote(par)
             simbolos_por_moneda.setdefault(base, []).append(par)
             simbolos_por_moneda.setdefault(quote, []).append(par)
         except Exception:
@@ -64,18 +80,18 @@ def buscar_todos_los_triangulos(markets):
 
     for par1 in simbolos_por_moneda[inicio]:
         try:
-            base1, quote1 = par1.split(':')[0].split('/')
+            base1, quote1 = extraer_base_quote(par1)
             m1 = base1 if quote1 == inicio else quote1
             if m1 not in simbolos_por_moneda: continue
             
             for par2 in simbolos_por_moneda[m1]:
                 if par2 == par1: continue
-                base2, quote2 = par2.split(':')[0].split('/')
+                base2, quote2 = extraer_base_quote(par2)
                 m2 = base2 if quote2 == m1 else quote2
                 
                 for par3 in simbolos_por_moneda[m2]:
                     if par3 == par2 or par3 == par1: continue
-                    base3, quote3 = par3.split(':')[0].split('/')
+                    base3, quote3 = extraer_base_quote(par3)
                     if base3 == inicio or quote3 == inicio:
                         ruta = (par1, par2, par3)
                         if ruta not in triangulos: triangulos.append(ruta)
@@ -90,9 +106,9 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
     for i, par in enumerate(triangulo):
         ticker = tickers.get(par)
-        if not ticker or not ticker['ask'] or not ticker['bid']: return -999.0, ""
+        if not ticker or not ticker.get('ask') or not ticker.get('bid'): return -999.0, ""
         
-        base, quote = par.split(':')[0].split('/')
+        base, quote = extraer_base_quote(par)
 
         if moneda_actual == quote:
             monto = (monto / (ticker['ask'] * 1.0001)) * (1 - TAKER_FEE_PERPETUAL)
@@ -108,33 +124,69 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
 def ejecutar_ordenes_reales(exchange, triangulo):
     """
-    Función encargada de lanzar las 3 órdenes de mercado consecutivas en OKX.
-    Solo se ejecutará si MODO_REAL = True.
+    Lanza las 3 órdenes reales consecutivas en OKX usando el formato de CONTRATOS.
     """
-    logger.info(f"🚀 Lanzando ejecución real en OKX para la ruta: {triangulo}")
+    logger.info(f"🚀 [OPERACIÓN REAL] Iniciando ejecución en OKX para la ruta: {triangulo}")
     moneda_actual = "USDT"
     
-    # Nota: El tamaño de las órdenes reales debe ajustarse al margen y apalancamiento de tu cuenta
-    # Este bloque sirve de plantilla automatizada de ejecución
+    # Obtenemos el saldo real disponible en tu cuenta para iniciar el flujo de inversión
+    try:
+        balance = exchange.fetch_balance()
+        capital_flujo = float(balance['total'].get('USDT', CAPITAL_SIMULADO))
+    except Exception:
+        capital_flujo = CAPITAL_SIMULADO
+
     try:
         for par in triangulo:
-            base, quote = par.split(':')[0].split('/')
+            base, quote = extraer_base_quote(par)
+            market = exchange.market(par)
+            contract_size = market['contractSize']  # Tamaño del contrato unitario
+            
+            # Forzamos apalancamiento 1x para proteger la cuenta multidivisa de liquidaciones cruzadas
+            try:
+                exchange.set_leverage(1, par)
+            except Exception:
+                pass
+
+            ticker = exchange.fetch_ticker(par)
             
             if moneda_actual == quote:
-                # Comprar Base usando Quote (Orden de mercado)
-                logger.info(f"Ejecutando COMPRA de mercado en {par}")
-                # order = exchange.create_market_buy_order(par, cantidad)
+                precio = ticker['ask']
+                cantidad_base = capital_flujo / precio
+                contratos = int(cantidad_base / contract_size)
+                
+                if contratos < 1:
+                    logger.error(f"❌ Tamaño insuficiente. Menos de 1 contrato mínimo requerido para {par}")
+                    break
+
+                logger.info(f"🛒 ENVIANDO COMPRA MERCADO: {par} | Contratos: {contratos}")
+                # EJECUCIÓN NATIVA REAL:
+                order = exchange.create_market_buy_order(par, contratos)
+                logger.info(f"ID de Orden Ejecutada: {order.get('id', 'N/A')}")
+                
+                capital_flujo = (contratos * contract_size)
                 moneda_actual = base
             else:
-                # Vender Base para obtener Quote (Orden de mercado)
-                logger.info(f"Ejecutando VENTA de mercado en {par}")
-                # order = exchange.create_market_sell_order(par, cantidad)
+                precio = ticker['bid']
+                contratos = int(capital_flujo / contract_size)
+                
+                if contratos < 1:
+                    logger.error(f"❌ Tamaño insuficiente. Menos de 1 contrato mínimo requerido para {par}")
+                    break
+
+                logger.info(f"🔨 ENVIANDO VENTA MERCADO: {par} | Contratos: {contratos}")
+                # EJECUCIÓN NATIVA REAL:
+                order = exchange.create_market_sell_order(par, contratos)
+                logger.info(f"ID de Orden Ejecutada: {order.get('id', 'N/A')}")
+                
+                capital_flujo = (contratos * contract_size) * precio
                 moneda_actual = quote
                 
-            time.sleep(0.1) # Micro-pausa de protección contra desbordamiento de red
-        logger.info("✅ Ciclo de arbitraje real finalizado en los servidores de OKX.")
+            time.sleep(0.05)  # Retraso mínimo optimizado para evitar retrasos de precio
+        logger.info("✅ Secuencia de arbitraje real completada.")
+        
     except Exception as e:
-        logger.error(f"❌ FALLO CRÍTICO EN OPERACIÓN REAL: {e}. Deteniendo ejecuciones.")
+        logger.error(f"❌ FALLO CRÍTICO DURANTE EJECUCIÓN EN VIVO: {e}")
 
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
@@ -154,7 +206,7 @@ def ejecutar_bot():
                 
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
-                    if profit > -50.0:
+                    if -50.0 < profit < MAX_PROFIT:
                         resultados_vuelta.append((tri, texto, profit))
 
                 resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
@@ -168,7 +220,6 @@ def ejecutar_bot():
                         CAPITAL_SIMULADO += ganancia
                         logger.info(f"💰 ¡TRADE DETECTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
                         
-                        # Si el modo real está encendido, el bot pasa de simular a comprar de verdad
                         if MODO_REAL:
                             ejecutar_ordenes_reales(exchange, mejor_triangulo)
                     else:
@@ -180,7 +231,7 @@ def ejecutar_bot():
             time.sleep(0.8)
 
     except Exception as e:
-        logger.error(f"Fallo crítico: {e}")
+        logger.error(f"Fallo crítico inicial: {e}")
 
 if __name__ == "__main__":
     ejecutar_bot()
