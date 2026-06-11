@@ -11,9 +11,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-# --- OPTIMIZACIÓN AGRESIVA DE GANANCIAS ---
+# --- PARÁMETROS DEL MOTOR ---
 TAKER_FEE = 0.0010       
-MIN_PROFIT = 0.31        # FILTRO BAJADO: Cubre 0.30% de comisiones y asegura 0.01% neto real
+MIN_PROFIT = 0.31        # Cubre 0.30% de comisiones triples y asegura ganancia neta
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.0
 CAPITAL_SIMULADO = 50.0  
@@ -76,7 +76,7 @@ def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx_publico()
     
-    logger.info("REINICIANDO MOTOR ALTA VELOCIDAD (>0.31%)")
+    logger.info("REINICIANDO MOTOR CON MONITOREO DE RECHAZOS")
     
     try:
         markets = exchange.load_markets()
@@ -99,15 +99,19 @@ def ejecutar_bot():
                     mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
                     if mejor_profit >= MIN_PROFIT:
+                        # Oportunidad aceptada y ejecutada
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ¡TRADE GANADOR SIMULADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Balance: ${CAPITAL_SIMULADO:.2f} USDT")
+                        logger.info(f"💰 ¡TRADE EJECUTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Balance: ${CAPITAL_SIMULADO:.2f} USDT")
+                    else:
+                        # NUEVA LÓGICA: Muestra la oportunidad rechazada en el log interno
+                        logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Motivo: No supera el +{MIN_PROFIT}% mínimo")
                 
             except Exception as e:
                 logger.error(f"Error en ciclo: {e}")
                 
-            # VELOCIDAD ALTA: Escaneo cada 0.5 segundos para no perder oportunidades ráfaga
+            # Escaneo a alta velocidad cada 0.5 segundos
             time.sleep(0.5)
 
     except Exception as e:
