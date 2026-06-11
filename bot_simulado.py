@@ -36,7 +36,7 @@ def buscar_todos_los_triangulos(markets):
     simbolos_por_moneda = {}
     for par in pares_swap:
         try:
-            # CORRECCIÓN CRÍTICA: Extraemos la parte limpia 'BTC/USDT' antes del ':'
+            # CORRECCIÓN DEFINITIVA: par.split(':')[0] extrae el string 'BTC/USDT' del formato 'BTC/USDT:USDT'
             par_limpio = par.split(':')[0]
             base, quote = par_limpio.split('/')
             
