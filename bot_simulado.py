@@ -23,7 +23,7 @@ data_compartida = {
     "record_min_profit": 0.0,
     "mejor_ruta": "N/A",
     "mejor_profit": 0.0,
-    "top_rutas_texto": "Cargando datos...",
+    "top_rutas_texto": "Cargando...",
     "transacciones_texto": "Esperando oportunidades (>= 0.3%)..."
 }
 
@@ -114,8 +114,8 @@ def bucle_bot_segundo():
                 
                 top_html = ""
                 for i, r in enumerate(top_3):
-                    color = "#02c076" if r[1] >= MIN_PROFIT else "#f84960"
-                    top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r[0]}</span><span style='color:{color};font-weight:bold;'>{r[1]:.4f}%</span></div>"
+                    color = "green" if r[1] >= MIN_PROFIT else "red"
+                    top_html += f"<p>#{i+1} {r[0]} -> <b style='color:{color};'>{r[1]:.4f}%</b></p>"
                 data_compartida["top_rutas_texto"] = top_html
 
                 if top_3:
@@ -135,7 +135,7 @@ def bucle_bot_segundo():
                     ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                     CAPITAL_SIMULADO += ganancia
                     
-                    tx_linea = f"<div style='display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #2b3139;font-size:13px;'><span style='color:#848e9c;'>{time.strftime('%H:%M:%S')}</span><span style='font-weight:bold;'>{mejor_ruta_texto}</span><span style='color:#02c076;font-weight:bold;'>+{mejor_profit:.2f}%</span><span style='font-weight:bold;'>${CAPITAL_SIMULADO:.2f}</span></div>"
+                    tx_linea = f"<p><span style='color:gray;'>{time.strftime('%H:%M:%S')}</span> | <b>{mejor_ruta_texto}</b> | <b style='color:green;'>+{mejor_profit:.2f}%</b> | <b>${CAPITAL_SIMULADO:.2f}</b></p>"
                     registro_trades.insert(0, tx_linea)
                     if len(registro_trades) > 5: registro_trades.pop()
                     data_compartida["transacciones_texto"] = "".join(registro_trades)
@@ -152,69 +152,50 @@ def bucle_bot_segundo():
 
 app = Flask(__name__)
 
-# Сигурен HTML шаблон без форматиращи конфликти
+# Шаблон, използващ изцяло чист HTML без никакви фигурни скоби в CSS стиловете
 html_template = """
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset='utf-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>OKX ARBITRAGE ULTRA PRO</title>
+    <title>OKX ARBITRAGE PRO</title>
     <meta http-equiv='refresh' content='1'>
-    <style>
-        body { background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }
-        .card { background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }
-        .grid { display: flex; gap: 10px; margin-top: 12px; }
-        .col { flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }
-        .label { color: #848e9c; font-size: 12px; }
-        .value { font-size: 18px; font-weight: bold; margin-top: 4px; }
-        .telemetria { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }
-    </style>
 </head>
-<body>
-    <h2 style='text-align:center;color:#eaecef;border-bottom:1px solid #2b3139;padding-bottom:10px;margin:0;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
+<body style='background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 15px;'>
+    <h2 style='text-align:center; color:#eaecef; border-bottom:1px solid #2b3139; padding-bottom:10px;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
     
-    <div class='card' style='text-align:center;'>
-        <div class='label'>Capital Simulado Disponible</div>
-        <div style='color:#02c076;font-size:36px;font-weight:bold;margin-top:5px;'>${{ "%.2f"|format(capital) }} USDT</div>
+    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px; text-align: center;'>
+        <p style='color: #848e9c; margin: 0;'>Capital Simulado Disponible</p>
+        <h1 style='color:#02c076; margin: 5px 0;'>${{ "%.2f"|format(capital) }} USDT</h1>
     </div>
     
-    <div class='grid'>
-        <div class='col'>
-            <div class='label'>Spread Maximo</div>
-            <div class='value' style='color:{{ color_p }};'>{{ "%.4f"|format(profit) }}%</div>
-        </div>
-        <div class='col'>
-            <div class='label'>Filtro Minimo</div>
-            <div class='value' style='color:#f0b90b;'>+{{ min_p }}%</div>
-        </div>
+    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
+        <p style='margin: 5px 0;'>Spread Maximo Actual: <b style='color:{{ color_p }};'>{{ "%.4f"|format(profit) }}%</b></p>
+        <p style='margin: 5px 0;'>Filtro Minimo Operacion: <b style='color:#f0b90b;'>+{{ min_p }}%</b></p>
     </div>
 
-    <div class='card'>
-        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Mas Rentables OKX</div>
+    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
+        <h4 style='color:#eaecef; margin: 0 0 10px 0;'>🔥 Top 3 Caminos Mas Rentables OKX</h4>
         {{ top_3|safe }}
     </div>
 
-    <div class='card'>
-        <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesion)</div>
-        <div style='display:flex;justify-content:space-between;font-size:13px;'>
-            <div><span class='label'>Max Spread:</span> <span style='color:#02c076;font-weight:bold;'>{{ "%.4f"|format(r_max) }}%</span></div>
-            <div><span class='label'>Min Spread:</span> <span style='color:#f84960;font-weight:bold;'>{{ "%.4f"|format(r_min) }}%</span></div>
-        </div>
+    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
+        <h4 style='color:#eaecef; margin: 0 0 10px 0;'>📊 Historial de Rangos (Sesion)</h4>
+        <p style='margin: 5px 0;'>Max Spread Visto: <b style='color:green;'>{{ "%.4f"|format(r_max) }}%</b></p>
+        <p style='margin: 5px 0;'>Min Spread Visto: <b style='color:red;'>{{ "%.4f"|format(r_min) }}%</b></p>
     </div>
 
-    <div class='card'>
-        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetria y Trafico de Red</div>
-        <div class='telemetria'>
-            <div><span class='label'>Rutas:</span> <b>{{ "{:,}".format(rutas) }}</b></div>
-            <div><span class='label'>Latencia:</span> <b>{{ "%.2f"|format(latencia) }}s</b></div>
-            <div><span class='label'>Peticion:</span> <b>{{ "%.1f"|format(peso) }} KB</b></div>
-            <div><span class='label'>Total Red:</span> <b>{{ "%.2f"|format(total_r) }} MB</b></div>
-        </div>
+    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
+        <h4 style='color:#eaecef; margin: 0 0 10px 0;'>⚙️ Telemetria и Trafico de Red</h4>
+        <p style='margin: 3px 0;'>Rutas en ejecucion: <b>{{ "{:,}".format(rutas) }}</b></p>
+        <p style='margin: 3px 0;'>Latencia Escaneo: <b>{{ "%.2f"|format(latencia) }}s</b></p>
+        <p style='margin: 3px 0;'>Peso Peticion API: <b>{{ "%.1f"|format(peso) }} KB</b></p>
+        <p style='margin: 3px 0;'>Total Red Descargado: <b>{{ "%.2f"|format(total_r) }} MB</b></p>
     </div>
 
-    <div class='card'>
-        <div class='label' style='border-bottom:1px solid #2b3139;padding-bottom:6px;margin-bottom:8px;font-weight:bold;color:#eaecef;'>📜 Registro de Operaciones Exitosas</div>
+    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
+        <h4 style='color:#eaecef; margin: 0 0 10px 0; border-bottom:1px solid #2b3139; padding-bottom:5px;'>📜 Registro de Operaciones Exitosas</h4>
         {{ trades|safe }}
     </div>
 </body>
@@ -234,3 +215,15 @@ def home():
         top_3=data_compartida['top_rutas_texto'],
         r_max=data_compartida['record_max_profit'],
         r_min=data_compartida['record_min_profit'],
+        rutas=data_compartida['total_triangulos'],
+        latencia=data_compartida['tiempo_escaneo'],
+        peso=data_compartida['tamano_peticion_kb'],
+        total_r=data_compartida['total_datos_mb'],
+        trades=data_compartida["transacciones_texto"]
+    )
+
+if __name__ == "__main__":
+    hilo_bot = threading.Thread(target=bucle_bot_segundo)
+    hilo_bot.daemon = True
+    hilo_bot.start()
+    app.run(host='0.0.0.0', port=8080, debug=False)
