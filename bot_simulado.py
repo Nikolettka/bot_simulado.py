@@ -249,4 +249,3 @@ def ejecutar_bot():
 
     except Exception as e:
         logger.error(f"Fallo crítico inicial: {e}")
-
