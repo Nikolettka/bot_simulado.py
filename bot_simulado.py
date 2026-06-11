@@ -49,7 +49,6 @@ def buscar_todos_los_triangulos(markets):
     global DICCIONARIO_MERCADOS
     DICCIONARIO_MERCADOS.clear()
     
-    # Речници за бързо търсене на съседни възли (Граф)
     adjacencia = {}
     
     for symbol, market in markets.items():
@@ -71,7 +70,6 @@ def buscar_todos_los_triangulos(markets):
                     'type': 'swap' if is_swap else 'spot'
                 }
                 
-                # Построяваме ребрата на графа (двупосочно търсене)
                 adjacencia.setdefault(base, set()).add((quote, symbol))
                 adjacencia.setdefault(quote, set()).add((base, symbol))
         except Exception:
@@ -83,7 +81,6 @@ def buscar_todos_los_triangulos(markets):
     inicio = 'USDT'
     if inicio not in adjacencia: return []
 
-    # Високоскоростно претърсване в дълбочина за 3 стъпки
     for m1, par1 in adjacencia[inicio]:
         if m1 not in adjacencia: continue
         for m2, par2 in adjacencia[m1]:
@@ -162,7 +159,7 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                     moneda_actual = base
                 else:
                     exchange.create_market_sell_order(par, capital_flujo)
-                    capital_flujo = capital_flujo * precio
+                    capital_flujo = capital_flujo * price
                     moneda_actual = quote
             time.sleep(0.05)
     except Exception:
@@ -189,8 +186,8 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
@@ -202,7 +199,8 @@ def ejecutar_bot():
                     else:
                         logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
                 else:
-                    logger.info("⏳ Esperando spreads...")
+                    # Премахнато емоджи, за да се избегне изкривяване на лог формата в Railway
+                    logger.info("Esperando spreads...")
             except Exception:
                 pass
             time.sleep(0.8)
