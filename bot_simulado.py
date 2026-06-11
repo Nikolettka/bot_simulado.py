@@ -55,17 +55,17 @@ def extraer_base_quote(par):
     """
     Универсално извличане на Base и Quote за OKX от текстов низ.
     """
-    # 1. Махаме излишното кодиране след двоеточието ('BTC/USDT:USDT' -> 'BTC/USDT')
-    par_limpio = par.split(':')[0]
+    # 1. Вземаме само лявата част преди двоеточието като чист текст ('BTC/USDT:USDT' -> 'BTC/USDT')
+    texto_par = par.split(':')[0]
     
     # 2. Обработваме стандартния формат на CCXT с наклонена черта
-    if '/' in par_limpio:
-        partes = par_limpio.split('/')
+    if '/' in texto_par:
+        partes = texto_par.split('/')
         return partes[0], partes[1]
         
     # 3. Алтернативна обработка за формати с тирета ('BTC-USDT-SWAP')
-    elif '-' in par_limpio:
-        partes = par_limpio.split('-')
+    elif '-' in texto_par:
+        partes = texto_par.split('-')
         return partes[0], partes[1]
         
     else:
