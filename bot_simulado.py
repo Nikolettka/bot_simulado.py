@@ -3,7 +3,7 @@ import threading
 import logging
 import ccxt
 import sys
-from flask import Flask, render_template_string, redirect, url_for
+from flask import Flask
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
@@ -13,7 +13,6 @@ MAX_PROFIT = 5.0
 TAKER_FEE = 0.0010     
 CAPITAL_SIMULADO = 50.0  
 
-# Interruptor de control global
 BOT_ENCENDIDO = True
 
 data_compartida = {
@@ -26,7 +25,7 @@ data_compartida = {
     "record_min_profit": 0.0,
     "mejor_ruta": "N/A",
     "mejor_profit": 0.0,
-    "top_rutas_texto": "Cargando...",
+    "top_rutas_texto": "Cargando datos...",
     "transacciones_texto": "Esperando oportunidades (>= 0.3%)..."
 }
 
@@ -97,11 +96,10 @@ def bucle_bot_segundo():
         data_compartida["total_triangulos"] = len(triangulos)
         
         while True:
-            # Si el interruptor está apagado, el bot duerme y no consulta la API
             if not BOT_ENCENDIDO:
-                data_compartida["mejor_ruta"] = "BOT DETENIDO / PAUSADO"
+                data_compartida["mejor_ruta"] = "MOTOR INTERRUMPIDO"
                 data_compartida["mejor_profit"] = 0.0
-                data_compartida["top_rutas_texto"] = "<p style='color:gray;'>Sistema en pausa por el usuario.</p>"
+                data_compartida["top_rutas_texto"] = "<p style='color:gray;'>Bot pausado por el usuario.</p>"
                 time.sleep(1)
                 continue
                 
@@ -125,8 +123,8 @@ def bucle_bot_segundo():
                 
                 top_html = ""
                 for i, r in enumerate(top_3):
-                    color = "green" if r[1] >= MIN_PROFIT else "red"
-                    top_html += f"<p>#{i+1} {r[0]} -> <b style='color:{color};'>{r[1]:.4f}%</b></p>"
+                    color = "#02c076" if r[1] >= MIN_PROFIT else "#f84960"
+                    top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r[0]}</span><span style='color:{color};font-weight:bold;'>{r[1]:.4f}%</span></div>"
                 data_compartida["top_rutas_texto"] = top_html
 
                 if top_3:
@@ -146,7 +144,7 @@ def bucle_bot_segundo():
                     ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                     CAPITAL_SIMULADO += ganancia
                     
-                    tx_linea = f"<p><span style='color:gray;'>{time.strftime('%H:%M:%S')}</span> | <b>{mejor_ruta_texto}</b> | <b style='color:green;'>+{mejor_profit:.2f}%</b> | <b>${CAPITAL_SIMULADO:.2f}</b></p>"
+                    tx_linea = f"<div style='display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #2b3139;font-size:13px;'><span style='color:#848e9c;'>{time.strftime('%H:%M:%S')}</span><span style='font-weight:bold;'>{mejor_ruta_texto}</span><span style='color:#02c076;font-weight:bold;'>+{mejor_profit:.2f}%</span><span style='font-weight:bold;'>${CAPITAL_SIMULADO:.2f}</span></div>"
                     registro_trades.insert(0, tx_linea)
                     if len(registro_trades) > 5: registro_trades.pop()
                     data_compartida["transacciones_texto"] = "".join(registro_trades)
@@ -163,7 +161,7 @@ def bucle_bot_segundo():
 
 app = Flask(__name__)
 
-# Diseño web con botones interactivos inyectados
+# Diseño plano sin etiquetas anidadas de entornos web complejos
 html_template = """
 <!DOCTYPE html>
 <html>
@@ -171,59 +169,66 @@ html_template = """
     <meta charset='utf-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <title>OKX ARBITRAGE PRO</title>
-    <meta http-equiv='refresh' content='1'>
+    <script>
+        setInterval(function(){{ window.location.reload(); }}, 1200);
+    </script>
+    <style>
+        body {{ background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }}
+        .card {{ background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }}
+        .grid {{ display: flex; gap: 10px; margin-top: 12px; }}
+        .col {{ flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }}
+        .label {{ color: #848e9c; font-size: 12px; }}
+        .value {{ font-size: 18px; font-weight: bold; margin-top: 4px; }}
+        .btn {{ display: inline-block; background-color: %s; color: white; padding: 10px 30px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-top: 10px; }}
+    </style>
 </head>
-<body style='background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 15px;'>
-    <h2 style='text-align:center; color:#eaecef; border-bottom:1px solid #2b3139; padding-bottom:10px;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
+<body>
+    <h2 style='text-align:center;color:#eaecef;border-bottom:1px solid #2b3139;padding-bottom:10px;margin:0;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
     
-    <!-- PANEL DE CONTROL ON/OFF -->
-    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; text-align: center;'>
-        <p style='margin: 0 0 10px 0; color:#848e9c; font-size:13px;'>Estado del Motor Principal</p>
-        <span style='background-color: {{ color_estado }}; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 14px;'>{{ texto_estado }}</span>
-        <div style='margin-top: 15px;'>
-            <a href='/toggle' style='text-decoration: none; background-color: {{ color_boton }}; color: white; padding: 10px 25px; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block;'>{{ texto_boton }} MOTOR</a>
+    <!-- CONTROL DE INTERRUPTOR VISIBLE -->
+    <div class='card' style='text-align:center;'>
+        <div class='label'>Estado del Sistema</div>
+        <div style='font-size:16px; font-weight:bold; margin-top:5px; color:%s;'>%s</div>
+        <a class='btn' href='/toggle'>%s MOTOR</a>
+    </div>
+
+    <div class='card' style='text-align:center;'>
+        <div class='label'>Capital Simulado Disponible</div>
+        <div style='color:#02c076;font-size:34px;font-weight:bold;margin-top:5px;'>$%s USDT</div>
+    </div>
+    
+    <div class='grid'>
+        <div class='col'>
+            <div class='label'>Spread Maximo</div>
+            <div class='value' style='color:%s;'>%s%%</div>
+        </div>
+        <div class='col'>
+            <div class='label'>Filtro Minimo</div>
+            <div class='value' style='color:#f0b90b;'>+%s%%</div>
         </div>
     </div>
 
-    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px; text-align: center;'>
-        <p style='color: #848e9c; margin: 0;'>Capital Simulado Disponible</p>
-        <h1 style='color:#02c076; margin: 5px 0;'>${{ "%.2f"|format(capital) }} USDT</h1>
-    </div>
-    
-    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
-        <p style='margin: 5px 0;'>Spread Maximo Actual: <b style='color:{{ color_p }};'>{{ "%.4f"|format(profit) }}%</b></p>
-        <p style='margin: 5px 0;'>Filtro Minimo Operacion: <b style='color:#f0b90b;'>+{{ min_p }}%</b></p>
+    <div class='card'>
+        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Mas Rentables OKX</div>
+        %s
     </div>
 
-    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
-        <h4 style='color:#eaecef; margin: 0 0 10px 0;'>🔥 Top 3 Caminos Mas Rentables OKX</h4>
-        {{ top_3|safe }}
+    <div class='card'>
+        <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesion)</div>
+        <div style='display:flex;justify-content:space-between;font-size:13px;'>
+            <div><span class='label'>Max Spread:</span> <b style='color:#02c076;'>%s%%</b></div>
+            <div><span class='label'>Min Spread:</span> <b style='color:#f84960;'>%s%%</b></div>
+        </div>
     </div>
 
-    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
-        <h4 style='color:#eaecef; margin: 0 0 10px 0;'>📊 Historial de Rangos (Sesion)</h4>
-        <p style='margin: 5px 0;'>Max Spread Visto: <b style='color:green;'>{{ "%.4f"|format(r_max) }}%</b></p>
-        <p style='margin: 5px 0;'>Min Spread Visto: <b style='color:red;'>{{ "%.4f"|format(r_min) }}%</b></p>
+    <div class='card'>
+        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetria и Trafico de Red</div>
+        <div style='font-size:12px; display:grid; grid-template-columns:1fr 1fr; gap:6px;'>
+            <div><span class='label'>Rutas:</span> <b>%s</b></div>
+            <div><span class='label'>Latencia:</span> <b>%s s</b></div>
+            <div><span class='label'>Peso API:</span> <b>%s KB</b></div>
+            <div><span class='label'>Total Red:</span> <b>%s MB</b></div>
+        </div>
     </div>
 
-    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
-        <h4 style='color:#eaecef; margin: 0 0 10px 0;'>⚙️ Telemetria и Trafico de Red</h4>
-        <p style='margin: 3px 0;'>Rutas en ejecucion: <b>{{ "{:,}".format(rutas) }}</b></p>
-        <p style='margin: 3px 0;'>Latencia Escaneo: <b>{{ "%.2f"|format(latencia) }}s</b></p>
-        <p style='margin: 3px 0;'>Peso Peticion API: <b>{{ "%.1f"|format(peso) }} KB</b></p>
-        <p style='margin: 3px 0;'>Total Red Descargado: <b>{{ "%.2f"|format(total_r) }} MB</b></p>
-    </div>
-
-    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px;'>
-        <h4 style='color:#eaecef; margin: 0 0 10px 0; border-bottom:1px solid #2b3139; padding-bottom:5px;'>📜 Registro de Operaciones Exitosas</h4>
-        {{ trades|safe }}
-    </div>
-</body>
-</html>
-"""
-
-@app.route('/')
-def home():
-    color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
-    
-    # Parámetros visuales del botón e indicador
+    <div class='card'>
