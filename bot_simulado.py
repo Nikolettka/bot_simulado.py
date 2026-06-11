@@ -14,7 +14,7 @@ logger = logging.getLogger()
 
 # --- PARÁMETROS DE SIMULACIÓN FORZADA ---
 TAKER_FEE = 0.0010       
-MIN_PROFIT = -1.0        # Filtro en negativo para que ejecute operaciones sin parar
+MIN_PROFIT = 3.0        # Filtro en negativo para que ejecute operaciones sin parar
 CAPITAL_INICIAL = 50.0
 CAPITAL_SIMULADO = 50.0  
 TOTAL_TRADES = 0
