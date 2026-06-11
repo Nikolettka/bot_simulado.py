@@ -118,8 +118,6 @@ class DashboardServer(BaseHTTPRequestHandler):
         </body>
         </html>
         """
-        self.send_header("Content-Length", str(len(html.encode("utf-8"))))
-        self.end_headers()
         self.wfile.write(html.encode("utf-8"))
 
     def log_message(self, format, *args): return
@@ -198,7 +196,7 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
                 if resultados_vuelta:
                     resultados_vuelta.sort(key=lambda x: x, reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
                     hora_actual = time.strftime("%H:%M:%S")
                     ULTIMO_SPREAD = mejor_profit
@@ -210,8 +208,11 @@ def ejecutar_bot():
                         ganancia_trade = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia_trade
                         HISTORIAL_EXITOSAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
-                        if len(HISTORIAL_EXITOSAS) > 5: HISTORIAL_EXITOSAS.pop(0)
-                        logger.info(f"💰 ¡TRADE SIMULADO DETECTADO! Ruta: {mejor_ruta_texto}")
+                        if len(HISTORIAL_EXITOSAS) > 5:
+                            HISTORIAL_EXITOSAS.pop(0)
+                        logger.info(f"💰 TRADE! Ruta: {mejor_ruta_texto}")
                     else:
                         HISTORIAL_RECHAZADAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
-                        if len(HISTORIAL_RECHAZADAS) > 5: HISTORIAL_RECHAZADAS.pop(0)
+                        if len(HISTORIAL_RECHAZADAS) > 5:
+                            HISTORIAL_RECHAZADAS.pop(0)
+                        logger.info(f"Scan... | Max Spread: {mejor_profit:.4f}%")
