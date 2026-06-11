@@ -5,10 +5,12 @@ import ccxt
 import sys
 import os
 
+# КОРЕКЦИЯ: Насочваме потока към stdout, за да спре Railway да го маркира като Error
 logging.basicConfig(
     level=logging.INFO, 
     format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout
 )
 logger = logging.getLogger()
 
@@ -159,7 +161,7 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                     moneda_actual = base
                 else:
                     exchange.create_market_sell_order(par, capital_flujo)
-                    capital_flujo = capital_flujo * price
+                    capital_flujo = capital_flujo * precio
                     moneda_actual = quote
             time.sleep(0.05)
     except Exception:
@@ -186,8 +188,8 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
+                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
@@ -199,7 +201,6 @@ def ejecutar_bot():
                     else:
                         logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
                 else:
-                    # Премахнато емоджи, за да се избегне изкривяване на лог формата в Railway
                     logger.info("Esperando spreads...")
             except Exception:
                 pass
