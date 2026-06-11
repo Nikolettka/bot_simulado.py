@@ -77,11 +77,11 @@
     </div>
 
     <script>
-        // Escuchador nativo del flujo continuo enviado por Railway
         const source = new EventSource("/stream");
 
         source.onmessage = function(event) {
-            const data = json.parse(event.data);
+            // ФИКС: Главни букви за JSON, за да се разчете на телефона
+            const data = JSON.parse(event.data);
             document.getElementById('capital').innerHTML = data.capital;
             document.getElementById('neto').innerHTML = data.neto;
             document.getElementById('trades_count').innerHTML = data.trades;
