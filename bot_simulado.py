@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-# --- PARÁMETROS DEL MOTOR ---
+# --- ПАРАМЕТРИ НА СИМУЛАТОРА ---
 TAKER_FEE = 0.0010       
 MIN_PROFIT = 0.31        
 MAX_PROFIT = 5.0      
@@ -70,18 +70,19 @@ def calcular_arbitraje(exchange, triangulo, tickers):
             moneda_actual = quote
         if i < 2: secuencia_texto += ">"
 
+    # Връща точно 2 елемента: процент и текст на пътя
     return (monto - 1.0) * 100, secuencia_texto
 
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx_publico()
     
-    logger.info("REINICIANDO MOTOR: VISUALIZACIÓN DE SALDO EN TIEMPO REAL")
+    logger.info("СТАРТИРАНЕ НА МОНИТОРИНГА НА БАЛАНСА...")
     
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Monitoreando {len(triangulos)} rutas a alta velocidad.")
+        logger.info(f"Сканиране на {len(triangulos)} пътища в OKX.")
         
         while True:
             try:
@@ -91,20 +92,22 @@ def ejecutar_bot():
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
                     if profit > -50.0:
+                        # Записваме точно кортеж от 2 елемента (текст, профит)
                         resultados_vuelta.append((texto, profit))
 
-                resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                # Сортиране по профит (втория елемент на кортежа)
+                resultados_vuelta.sort(key=lambda x: x[1], reverse=True)
                 
                 if resultados_vuelta:
-                    mejor_ruta_texto, mejor_profit = resultados_vuelta
+                    # Извличаме точно 2 стойности без софтуерен конфликт
+                    mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ¡TRADE EJECUTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
+                        logger.info(f"💰 [УСПЕШЕН ТРЕЙД #{TOTAL_TRADES}] Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
                     else:
-                        # MODIFICACIÓN CLAVE: Ahora añade el saldo actual retenido en cada log de rechazo
                         logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
                 
             except Exception as e:
@@ -113,7 +116,7 @@ def ejecutar_bot():
             time.sleep(0.5)
 
     except Exception as e:
-        logger.error(f"Fallo crítico: {e}")
+        logger.error(f"Fallo critico: {e}")
 
 if __name__ == "__main__":
     ejecutar_bot()
