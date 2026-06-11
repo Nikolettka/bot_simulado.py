@@ -5,13 +5,9 @@ if root.handlers:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", stream=sys.stdout)
 logger = logging.getLogger()
 
-# =====================================================================
-# 🚨 СИГУРЕН ИНТЕРРУПТОР ЗА РЕАЛЕН СПОТ ПАЗАР (РАБОТИ В ЕС!)
-# =====================================================================
-MODO_REAL = False  # Сменете на True, когато вашите USDT са в Trading акаунта
-
-# --- НАСТРОЙКИ ЗА ЧИСТ СПОТ ---
-TAKER_FEE_SPOT = 0.0010        # Такса за Спот пазар в OKX (0.10%)
+# --- СИГУРЕН И ОЛЕКОТЕН СИМУЛАЦИОНЕН МОДЕЛ ---
+MODO_REAL = False  
+TAKER_FEE_SPOT = 0.0010        
 MIN_PROFIT = 0.02              
 MAX_PROFIT = 5.0      
 CAPITAL_SIMULADO = 50.82  
@@ -54,7 +50,6 @@ def buscar_todos_los_triangulos(markets):
     adj = {}
     for sym, m in markets.items():
         try:
-            # СТРИКТЕН ФИЛТЪР: Само активни СПОТ пазари
             if not m.get('active', True) or not m.get('spot', False): continue
             b, q = m.get('base'), m.get('quote')
             if b in MONEDAS_TOP and q in MONEDAS_TOP:
@@ -92,50 +87,9 @@ def calcular_arbitraje(exchange, tri, tickers):
         if i < 2: seq += ">"
     return (monto - 1.0) * 100, seq
 
-def ejecutar_ordenes_reales(exchange, triangulo):
-    global DICCIONARIO_MERCADOS, CAPITAL_SIMULADO
-    logger.info(f"🚀 [ORDEN LIVE SPOT] Ejecutando: {triangulo}")
-    moneda_actual = "USDT"
-    try:
-        balance = exchange.fetch_balance()
-        capital_flujo = float(balance['total'].get('USDT', CAPITAL_SIMULADO))
-    except Exception:
-        capital_flujo = CAPITAL_SIMULADO
-
-    try:
-        for par in triangulo:
-            b, q = DICCIONARIO_MERCADOS[par]['base'], DICCIONARIO_MERCADOS[par]['quote']
-            ticker = exchange.fetch_ticker(par)
-            
-            if moneda_actual == q:
-                precio = ticker['ask']
-                cantidad_comprar = capital_flujo / precio
-                logger.info(f"🛒 COMPRA SPOT: {par} | Cantidad: {cantidad_comprar}")
-                exchange.create_market_buy_order(par, cantidad_comprar)
-                capital_flujo = cantidad_comprar
-                moneda_actual = b
-            else:
-                precio = ticker['bid']
-                logger.info(f"🔨 VENTA SPOT: {par} | Cantidad: {capital_flujo}")
-                exchange.create_market_sell_order(par, capital_flujo)
-                capital_flujo = capital_flujo * precio
-                moneda_actual = q
-            time.sleep(0.05)
-        logger.info("✅ Arbitraje Spot completado con éxito en OKX.")
-    except Exception as e:
-        logger.error(f"❌ Error en orden Spot: {e}")
-
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO, HISTORIAL_EXITOSAS, HISTORIAL_RECHAZADAS
-    
-    # Инициализация с API ключовете от вашите променливи в Railway
-    config = {'enableRateLimit': True}
-    if os.getenv('OKX_API_KEY'):
-        config['apiKey'] = os.getenv('OKX_API_KEY')
-        config['secret'] = os.getenv('OKX_SECRET')
-        config['password'] = os.getenv('OKX_PASSWORD')
-    
-    exchange = ccxt.okx(config)
+    exchange = ccxt.okx({'enableRateLimit': True})
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
@@ -155,8 +109,6 @@ def ejecutar_bot():
                     CAPITAL_SIMULADO += CAPITAL_SIMULADO * (mejor_profit / 100)
                     HISTORIAL_EXITOSAS.append({"hora": hr, "ruta": mejor_txt, "profit": mejor_profit})
                     logger.info(f"TRADE OK: {mejor_txt}")
-                    if MODO_REAL:
-                        ejecutar_ordenes_reales(exchange, mejor_tri)
                 else:
                     HISTORIAL_RECHAZADAS.append({"hora": hr, "ruta": mejor_txt, "profit": mejor_profit})
                     logger.info(f"Scan Spot... | Max: {mejor_profit:.4f}%")
