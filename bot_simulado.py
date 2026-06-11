@@ -61,7 +61,6 @@ def buscar_todos_los_triangulos(markets):
             is_spot = market.get('spot', False)
             is_swap = market.get('swap', False)
             
-            # Подсигурена проверка за котирана валута или сетълмент
             quote_usdt = market.get('quote') == 'USDT'
             settle_usdt = market.get('settle') == 'USDT' if is_swap else False
             
@@ -226,7 +225,6 @@ def ejecutar_bot():
                     if -50.0 < profit < MAX_PROFIT:
                         resultados_vuelta.append((tri, texto, profit))
 
-                # Подсигурено сортиране само ако има открити резултати
                 if resultados_vuelta:
                     resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
                     mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
@@ -245,3 +243,10 @@ def ejecutar_bot():
                     logger.info("⏳ Анализ на пазара: Изчакване на спредове...")
                 
             except Exception as e:
+                logger.error(f"Error en ciclo activo: {e}")
+                
+            time.sleep(0.8)
+
+    except Exception as e:
+        logger.error(f"Fallo crítico inicial: {e}")
+
