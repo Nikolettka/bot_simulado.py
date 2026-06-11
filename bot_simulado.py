@@ -49,7 +49,7 @@ class DashboardServer(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.end_headers()
+        self.end_headers() # CORRECCIÓN CRÍTICA: Envía las cabeceras HTTP correctamente
         
         html_exitosas = ""
         for t in reversed(HISTORIAL_EXITOSAS):
@@ -219,4 +219,3 @@ def ejecutar_bot():
     except Exception as e:
         logger.error(f"Fallo: {e}")
 
-# Изпълнение на кода без чупливи структури (Линейно)
