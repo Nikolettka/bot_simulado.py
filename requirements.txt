@@ -1,4 +1,3 @@
+```text
 ccxt
-dash
-pandas
-plotly
+flask
