@@ -3,7 +3,6 @@ import threading
 import logging
 import ccxt
 import sys
-import os
 from flask import Flask
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -100,7 +99,7 @@ def bucle_bot_segundo():
             if not BOT_ENCENDIDO:
                 data_compartida["mejor_ruta"] = "MOTOR INTERRUMPIDO"
                 data_compartida["mejor_profit"] = 0.0
-                data_compartida["top_rutas_texto"] = "<p style='color:gray;'>Bot pausado por el usuario.</p>"
+                data_compartida["top_rutas_texto"] = "<div style='color:gray;text-align:center;'>Bot pausado por el usuario.</div>"
                 time.sleep(1)
                 continue
                 
@@ -119,17 +118,17 @@ def bucle_bot_segundo():
                     if profit > -50.0:
                         resultados_vuelta.append((texto, profit))
 
-                resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                resultados_vuelta.sort(key=lambda x: x[1], reverse=True)
                 top_3 = resultados_vuelta[:3]
                 
                 top_html = ""
                 for i, r in enumerate(top_3):
-                    color = "#02c076" if r >= MIN_PROFIT else "#f84960"
-                    top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r}</span><span style='color:{color};font-weight:bold;'>{r:.4f}%</span></div>"
+                    color = "#02c076" if r[1] >= MIN_PROFIT else "#f84960"
+                    top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r[0]}</span><span style='color:{color};font-weight:bold;'>{r[1]:.4f}%</span></div>"
                 data_compartida["top_rutas_texto"] = top_html
 
                 if top_3:
-                    mejor_ruta_texto, mejor_profit = top_3
+                    mejor_ruta_texto, mejor_profit = top_3[0]
                 else:
                     mejor_ruta_texto, mejor_profit = "N/A", 0.0
                     
@@ -155,7 +154,9 @@ def bucle_bot_segundo():
 
             except Exception as e:
                 logger.error(f"Error ciclo: {e}")
-            time.sleep(1)
+                
+            # ESCANEO REDUCIDO A 3 SEGUNDOS PARA PROTEGER DATOS DEL SERVIDOR
+            time.sleep(3)
 
     except Exception as e:
         logger.error(f"Fallo critico: {e}")
@@ -165,13 +166,13 @@ app = Flask(__name__)
 @app.route('/')
 def home():
     color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
+    
     c_btn = "#f84960" if BOT_ENCENDIDO else "#02c076"
     c_est = "#02c076" if BOT_ENCENDIDO else "#f84960"
     t_est = "SISTEMA ACTIVO / CORRIENDO" if BOT_ENCENDIDO else "SISTEMA DETENIDO / EN PAUSA"
     t_btn = "APAGAR" if BOT_ENCENDIDO else "ENCENDER"
 
     try:
-        # Прочитане на изнесения външен HTML шаблон
         with open('index.html', 'r', encoding='utf-8') as f:
             html_template = f.read()
     except Exception:
