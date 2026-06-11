@@ -19,19 +19,22 @@ CAPITAL_SIMULADO = 50.0
 TOTAL_TRADES = 0
 
 def inicializar_okx_perpetual():
-    """Inicializa OKX configurado para el mercado de swaps perpetuos."""
-    return ccxt.okx({
-        'enableRateLimit': True,        
-        'options': {'defaultType': 'swap'} 
+    """Inicializa OKX configurado correctamente para forzar la carga de Swaps."""
+    exchange = ccxt.okx({
+        'enableRateLimit': True,
     })
+    # КРИТИЧНА КОРЕКЦИЯ: Задаваме типа на пазара директно в обекта, 
+    # за да може load_markets() да свали правилните фючърсни договори.
+    exchange.options['defaultType'] = 'swap'
+    return exchange
 
 def buscar_todos_los_triangulos(markets):
     """Filtra y construye rutas triangulares utilizando contratos de swaps perpetuos."""
-    # Търсим пазари, които са активни и използват USDT за разплащане (settle)
     pares_swap = []
     simbolos_por_moneda = {}
     
     for symbol, market in markets.items():
+        # Търсим активни безкрайни фючърси (swap), сетълнати в USDT
         if market.get('swap') and market.get('active') and market.get('settle') == 'USDT':
             pares_swap.append(symbol)
             base = market.get('base')
@@ -46,28 +49,31 @@ def buscar_todos_los_triangulos(markets):
     if inicio not in simbolos_por_moneda: 
         return []
 
-    # Логика за изграждане на триъгълници, базирана на реалните обекти от CCXT
+    # Изграждане на триъгълни маршрути
     for par1 in simbolos_por_moneda[inicio]:
-        m1_base = markets[par1]['base']
-        m1_quote = markets[par1]['quote']
-        m1 = m1_base if m1_quote == inicio else m1_quote
-        if m1 not in simbolos_por_moneda: continue
-        
-        for par2 in simbolos_por_moneda[m1]:
-            if par2 == par1: continue
-            m2_base = markets[par2]['base']
-            m2_quote = markets[par2]['quote']
-            m2 = m2_base if m2_quote == m1 else m2_quote
+        try:
+            m1_base = markets[par1]['base']
+            m1_quote = markets[par1]['quote']
+            m1 = m1_base if m1_quote == inicio else m1_quote
+            if m1 not in simbolos_por_moneda: continue
             
-            for par3 in simbolos_por_moneda[m2]:
-                if par3 == par2 or par3 == par1: continue
-                m3_base = markets[par3]['base']
-                m3_quote = markets[par3]['quote']
+            for par2 in simbolos_por_moneda[m1]:
+                if par2 == par1: continue
+                m2_base = markets[par2]['base']
+                m2_quote = markets[par2]['quote']
+                m2 = m2_base if m2_quote == m1 else m2_quote
                 
-                if m3_base == inicio or m3_quote == inicio:
-                    ruta = (par1, par2, par3)
-                    if ruta not in triangulos: 
-                        triangulos.append(ruta)
+                for par3 in simbolos_por_moneda[m2]:
+                    if par3 == par2 or par3 == par1: continue
+                    m3_base = markets[par3]['base']
+                    m3_quote = markets[par3]['quote']
+                    
+                    if m3_base == inicio or m3_quote == inicio:
+                        ruta = (par1, par2, par3)
+                        if ruta not in triangulos: 
+                            triangulos.append(ruta)
+        except Exception:
+            continue
                         
     return triangulos
 
@@ -105,6 +111,7 @@ def ejecutar_bot():
     logger.info("🚀 START_BOT: MERCADO FUTUROS PERPETUOS SELECCIONADO")
     
     try:
+        # Сега вече ще зареди реалните Swap пазари на OKX
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
         logger.info(f"Escaneando {len(triangulos)} combinaciones en contratos perpetuos OKX.")
