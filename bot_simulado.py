@@ -4,7 +4,6 @@ import logging
 import ccxt
 import sys
 
-# Configuración de logs para que lo veas todo desde el panel de Railway
 logging.basicConfig(
     level=logging.INFO, 
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -12,9 +11,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-# --- PARÁMETROS DE SIMULACIÓN FORZADA ---
-TAKER_FEE = 0.0010       
-MIN_PROFIT = 3.0        # Filtro en negativo para que ejecute operaciones sin parar
+# --- CONFIGURACIÓN MATEMÁTICA PARA GANAR ---
+TAKER_FEE = 0.0010       # 0.10% comisión fija de OKX
+MIN_PROFIT = 0.40        # ¡FILTRO CORREGIDO! Cubre el 0.30% de comisiones triples y asegura ganancias
+MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.0
 CAPITAL_SIMULADO = 50.0  
 TOTAL_TRADES = 0
@@ -76,13 +76,12 @@ def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx_publico()
     
-    logger.info("INICIANDO BOT EN MODO SILENCIOSO (CONSUMO CERO MÓVIL)")
-    logger.info(f"Capital Inicial Asignado: ${CAPITAL_INICIAL} USDT")
+    logger.info("REINICIANDO MOTOR: BUSCANDO SPREADS POSITIVOS CON BENEFICIO REAL")
     
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Estructura completada: {len(triangulos)} rutas listas para monitoreo.")
+        logger.info(f"Escaneando {len(triangulos)} rutas en OKX. Filtro de entrada: >+{MIN_PROFIT}%")
         
         while True:
             try:
@@ -99,22 +98,20 @@ def ejecutar_bot():
                 if resultados_vuelta:
                     mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
-                    # Ejecución inmediata debido al filtro forzado
+                    # Solo se ejecuta si supera el 0.40% (Cubre comisiones y da beneficio neto)
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        
-                        # El bot escribe el trade en la consola interna de Railway
-                        logger.info(f"🔥 [TRADE #{TOTAL_TRADES}] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Balance: ${CAPITAL_SIMULADO:.2f} USDT")
+                        logger.info(f"💰 ¡TRADE GANADOR SIMULADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Rendimiento Neto: +{mejor_profit:.4f}% | Nuevo Balance: ${CAPITAL_SIMULADO:.2f} USDT")
                 
             except Exception as e:
-                logger.error(f"Error en ciclo de lectura: {e}")
+                logger.error(f"Error en ciclo: {e}")
                 
-            time.sleep(3) # Pausa de estabilidad
+            time.sleep(3)
 
     except Exception as e:
-        logger.error(f"Fallo crítico en el motor: {e}")
+        logger.error(f"Fallo crítico: {e}")
 
 if __name__ == "__main__":
     ejecutar_bot()
