@@ -5,7 +5,7 @@ import ccxt
 import sys
 import os
 
-# Configuración del flujo de salida limpio hacia stdout para Railway
+# Изчистване на старите логъри и форсиране към чист stdout за Railway
 root = logging.getLogger()
 if root.handlers:
     for handler in root.handlers:
@@ -20,13 +20,13 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # =====================================================================
-# 🚨 INTERRUPTOR DE SEGURIDAD PRINCIPAL
+# 🚨 ГЛАВЕН ПРЕКЪСВАЧ ЗА СИГУРНОСТ
 # =====================================================================
-MODO_REAL = False  # Cambiar a True SOLO cuando quieras usar dinero real
+MODO_REAL = False  # Променете на True САМО когато искате да търгувате с реални пари
 
-# --- CONFIGURACIÓN MATEMÁTICA ---
+# --- МАТЕМАТИЧЕСКА НАСТРОЙКА ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.22              # Tu filtro mínimo para ejecutar
+MIN_PROFIT = 0.22              
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
@@ -44,7 +44,7 @@ def inicializar_okx():
         exchange = ccxt.okx(config)
         try:
             exchange.private_post_account_set_account_position_mode({'acctLv': '2'})
-            logger.info("✅ Modo Multi-Moneda verificado e activado exitosamente.")
+            logger.info("✅ Modo Multi-Moneda verificado и activado exitosamente.")
         except Exception:
             pass
         return exchange
@@ -52,7 +52,7 @@ def inicializar_okx():
         return ccxt.okx(config)
 
 def buscar_todos_los_triangulos(markets):
-    """Búsqueda ultra rápida de rutas triangulares usando Grafos y Sets."""
+    """Високоскоростно намиране на триъгълници чрез Sets."""
     global DICCIONARIO_MERCADOS
     DICCIONARIO_MERCADOS.clear()
     adjacencia = {}
@@ -81,7 +81,7 @@ def buscar_todos_los_triangulos(markets):
         except Exception:
             continue
             
-    logger.info(f"Mercados híbridos indexados con éxito: {len(DICCIONARIO_MERCADOS)}")
+    logger.info(f"Mercados hibridos indexados con exito: {len(DICCIONARIO_MERCADOS)}")
     
     triangulos = []
     inicio = 'USDT'
@@ -192,7 +192,6 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    # Ordenamos para encontrar la mejor oportunidad de este segundo
                     resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
                     mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
@@ -204,7 +203,7 @@ def ejecutar_bot():
                         if MODO_REAL:
                             ejecutar_ordenes_reales(exchange, mejor_triangulo)
                     else:
-                        # MODIFICACIÓN: Ahora te muestra en vivo el mejor spread disponible en cada segundo
+                        # ТУК Е ПРАВИЛНОТО МЯСТО НА РЕДА (вътре в правилния блок и функция)
                         logger.info(f"Analizando... | Mejor Spread actual: {mejor_profit:.4f}% | Ruta: {mejor_ruta_texto}")
                 else:
                     logger.info("Esperando spreads...")
@@ -215,4 +214,4 @@ def ejecutar_bot():
         logger.error(f"Fallo crítico inicial: {e}")
 
 if __name__ == "__main__":
-                            logger.info(f"Analizando... | Mejor Spread actual: {mejor_profit:.4f}% | Ruta: {mejor_ruta_texto}")
+    ejecutar_bot()
