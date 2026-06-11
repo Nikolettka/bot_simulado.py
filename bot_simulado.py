@@ -5,7 +5,7 @@ import ccxt
 import sys
 import os
 
-# Изчистване на старите логъри и форсиране към чист stdout за Railway
+# Configuración del flujo de salida limpio hacia stdout para Railway
 root = logging.getLogger()
 if root.handlers:
     for handler in root.handlers:
@@ -20,13 +20,13 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # =====================================================================
-# 🚨 ГЛАВЕН ПРЕКЪСВАЧ ЗА СИГУРНОСТ
+# 🚨 INTERRUPTOR DE SEGURIDAD PRINCIPAL - ¡MANTENIDO EN SIMULADO!
 # =====================================================================
-MODO_REAL = False  # Променете на True САМО когато искате да търгувате с реални пари
+MODO_REAL = False  # Dinero falso/simulado. Tu saldo real está 100% a salvo.
 
-# --- МАТЕМАТИЧЕСКА НАСТРОЙКА ---
+# --- CONFIGURACIÓN MATEMÁTICA ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.22              
+MIN_PROFIT = 0.15              # Filtro bajado a 0.15% para capturar más oportunidades
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
@@ -36,23 +36,10 @@ DICCIONARIO_MERCADOS = {}
 
 def inicializar_okx():
     config = {'enableRateLimit': True}
-    if MODO_REAL:
-        logger.warning("⚠️ MODO REAL ACTIVADO: El bot usará fondos reales de tu cuenta.")
-        config['apiKey'] = os.getenv('OKX_API_KEY')       
-        config['secret'] = os.getenv('OKX_SECRET')       
-        config['password'] = os.getenv('OKX_PASSWORD')   
-        exchange = ccxt.okx(config)
-        try:
-            exchange.private_post_account_set_account_position_mode({'acctLv': '2'})
-            logger.info("✅ Modo Multi-Moneda verificado и activado exitosamente.")
-        except Exception:
-            pass
-        return exchange
-    else:
-        return ccxt.okx(config)
+    return ccxt.okx(config)
 
 def buscar_todos_los_triangulos(markets):
-    """Високоскоростно намиране на триъгълници чрез Sets."""
+    """Búsqueda ultra rápida de rutas triangulares usando Grafos y Sets."""
     global DICCIONARIO_MERCADOS
     DICCIONARIO_MERCADOS.clear()
     adjacencia = {}
@@ -125,52 +112,6 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
     return (monto - 1.0) * 100, secuencia_texto
 
-def ejecutar_ordenes_reales(exchange, triangulo):
-    global DICCIONARIO_MERCADOS
-    logger.info(f"🚀 [OPERACIÓN REAL] Lanzando ejecución: {triangulo}")
-    moneda_actual = "USDT"
-    try:
-        balance = exchange.fetch_balance()
-        capital_flujo = float(balance['total'].get('USDT', CAPITAL_SIMULADO))
-    except Exception:
-        capital_flujo = CAPITAL_SIMULADO
-
-    try:
-        for par in triangulo:
-            base = DICCIONARIO_MERCADOS[par]['base']
-            quote = DICCIONARIO_MERCADOS[par]['quote']
-            tipo = DICCIONARIO_MERCADOS[par]['type']
-            ticker = exchange.fetch_ticker(par)
-            
-            if tipo == 'swap':
-                market = exchange.market(par)
-                contract_size = market['contractSize']
-                precio = ticker['ask'] if moneda_actual == quote else ticker['bid']
-                contratos = int((capital_flujo / precio) / contract_size) if moneda_actual == quote else int(capital_flujo / contract_size)
-                if contratos < 1: break
-                if moneda_actual == quote:
-                    exchange.create_market_buy_order(par, contratos)
-                    capital_flujo = (contratos * contract_size)
-                    moneda_actual = base
-                else:
-                    exchange.create_market_sell_order(par, contratos)
-                    capital_flujo = (contratos * contract_size) * precio
-                    moneda_actual = quote
-            else:
-                precio = ticker['ask'] if moneda_actual == quote else ticker['bid']
-                if moneda_actual == quote:
-                    cantidad = capital_flujo / precio
-                    exchange.create_market_buy_order(par, cantidad)
-                    capital_flujo = cantidad
-                    moneda_actual = base
-                else:
-                    exchange.create_market_sell_order(par, capital_flujo)
-                    capital_flujo = capital_flujo * precio
-                    moneda_actual = quote
-            time.sleep(0.05)
-    except Exception:
-        pass
-
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
@@ -192,19 +133,17 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ¡TRADE DETECTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
-                        if MODO_REAL:
-                            ejecutar_ordenes_reales(exchange, mejor_triangulo)
+                        logger.info(f"💰 ¡TRADE SIMULADO DETECTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo Ficticio: ${CAPITAL_SIMULADO:.2f} USDT")
                     else:
-                        # ТУК Е ПРАВИЛНОТО МЯСТО НА РЕДА (вътре в правилния блок и функция)
-                        logger.info(f"Analizando... | Mejor Spread actual: {mejor_profit:.4f}% | Ruta: {mejor_ruta_texto}")
+                        # Te muestra el spread máximo en tiempo real para ver cómo bailan los números cerca de 0.15%
+                        logger.info(f"Esperando spreads... | Mejor Spread actual: {mejor_profit:.4f}% | Objetivo: {MIN_PROFIT}%")
                 else:
                     logger.info("Esperando spreads...")
             except Exception:
