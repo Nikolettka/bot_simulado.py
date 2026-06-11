@@ -19,23 +19,27 @@ CAPITAL_SIMULADO = 50.0
 TOTAL_TRADES = 0
 
 def inicializar_okx_perpetual():
-    """Inicializa OKX configurado correctamente para forzar la carga de Swaps."""
-    exchange = ccxt.okx({
+    """Inicializa OKX cargando todos los tipos de mercado de manera explícita."""
+    return ccxt.okx({
         'enableRateLimit': True,
+        # Eliminamos restricciones rígidas iniciales para forzar la descarga completa
     })
-    # КРИТИЧНА КОРЕКЦИЯ: Задаваме типа на пазара директно в обекта, 
-    # за да може load_markets() да свали правилните фючърсни договори.
-    exchange.options['defaultType'] = 'swap'
-    return exchange
 
 def buscar_todos_los_triangulos(markets):
     """Filtra y construye rutas triangulares utilizando contratos de swaps perpetuos."""
     pares_swap = []
     simbolos_por_moneda = {}
     
+    # Imprime en log el total bruto descargado para diagnóstico
+    logger.info(f"Total bruto de mercados descargados desde OKX: {len(markets)}")
+    
     for symbol, market in markets.items():
-        # Търсим активни безкрайни фючърси (swap), сетълнати в USDT
-        if market.get('swap') and market.get('active') and market.get('settle') == 'USDT':
+        # Verificación triple: Info interna de CCXT o el formato nativo de OKX (id contiene 'SWAP')
+        es_swap = market.get('swap') or (market.get('info') and market['info'].get('instType') == 'SWAP')
+        es_activo = market.get('active', True)
+        es_usdt = market.get('settle') == 'USDT' or market.get('quote') == 'USDT'
+
+        if es_swap and es_activo and es_usdt:
             pares_swap.append(symbol)
             base = market.get('base')
             quote = market.get('quote')
@@ -47,6 +51,7 @@ def buscar_todos_los_triangulos(markets):
     triangulos = []
     inicio = 'USDT'
     if inicio not in simbolos_por_moneda: 
+        logger.warning("No se encontró la moneda base USDT en la lista filtrada.")
         return []
 
     # Изграждане на триъгълни маршрути
@@ -108,17 +113,16 @@ def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx_perpetual()
     
-    logger.info("🚀 START_BOT: MERCADO FUTUROS PERPETUOS SELECCIONADO")
+    logger.info("🚀 START_BOT: INICIANDO ESCÁNER DE ARBITRAJE")
     
     try:
-        # Сега вече ще зареди реалните Swap пазари на OKX
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Escaneando {len(triangulos)} combinaciones en contratos perpetuos OKX.")
-        logger.info(f"Filtro de beneficio neto real establecido en: >+{MIN_PROFIT}%")
+        logger.info(f"Escaneando {len(triangulos)} combinaciones válidas en OKX Swaps.")
+        logger.info(f"Filtro de beneficio neto establecido en: >+{MIN_PROFIT}%")
         
         if len(triangulos) == 0:
-            logger.error("No se encontraron combinaciones triangulares. Apagando para evitar bucle infinito.")
+            logger.error("No se encontraron combinaciones triangulares. Apagando contenedor para evitar bucle.")
             return
 
         while True:
@@ -153,10 +157,10 @@ def ejecutar_bot():
                 logger.error(f"Error en ciclo perpetuo: {e}")
                 time.sleep(2)
                 
-            time.sleep(2.0)
+            time.sleep(2.5) # Pausa segura de ejecución
 
     except Exception as e:
-        logger.error(f"Fallo crítico en el motor perpetuo: {e}")
+        logger.error(f"Fallo crítico en el motor: {e}")
 
 if __name__ == "__main__":
     ejecutar_bot()
