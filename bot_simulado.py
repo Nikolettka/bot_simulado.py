@@ -185,7 +185,7 @@ def ejecutar_bot():
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Estructura lista para monitoreo en vivo.")
+        logger.info(f"Estructura lista para monitoreo.")
         while True:
             try:
                 tickers = exchange.fetch_tickers()
@@ -210,9 +210,10 @@ def ejecutar_bot():
                         HISTORIAL_EXITOSAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
                         if len(HISTORIAL_EXITOSAS) > 5:
                             HISTORIAL_EXITOSAS.pop(0)
-                        logger.info(f"💰 TRADE! Ruta: {mejor_ruta_texto}")
+                        logger.info(f"TRADE OK: {mejor_ruta_texto}")
                     else:
                         HISTORIAL_RECHAZADAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
                         if len(HISTORIAL_RECHAZADAS) > 5:
                             HISTORIAL_RECHAZADAS.pop(0)
-                        logger.info(f"Scan... | Max Spread: {mejor_profit:.4f}%")
+                        logger.info(f"Scan... | Max: {mejor_profit:.4f}%")
+            except Exception:
