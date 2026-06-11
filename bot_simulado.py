@@ -5,7 +5,12 @@ import ccxt
 import sys
 import os
 
-# КОРЕКЦИЯ: Насочваме потока към stdout, за да спре Railway да го маркира като Error
+# КОРЕКЦИЯ: Пълно изчистване на старите логъри и форсиране към чист stdout
+root = logging.getLogger()
+if root.handlers:
+    for handler in root.handlers:
+        root.removeHandler(handler)
+
 logging.basicConfig(
     level=logging.INFO, 
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -188,8 +193,8 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
