@@ -36,9 +36,9 @@ def buscar_todos_los_triangulos(markets):
     simbolos_por_moneda = {}
     for par in pares_swap:
         try:
-            # Corrección del split: Primero quitamos el :SETTLE si existe, luego dividimos BASE/QUOTE
-            partes_par = par.split(':')[0]
-            base, quote = partes_par.split('/')
+            # CORRECCIÓN CRÍTICA: Extraemos la parte limpia 'BTC/USDT' antes del ':'
+            par_limpio = par.split(':')[0]
+            base, quote = par_limpio.split('/')
             
             simbolos_por_moneda.setdefault(base, []).append(par)
             simbolos_por_moneda.setdefault(quote, []).append(par)
@@ -51,21 +51,21 @@ def buscar_todos_los_triangulos(markets):
 
     for par1 in simbolos_por_moneda[inicio]:
         try:
-            partes1 = par1.split(':')[0]
-            base1, quote1 = partes1.split('/')
+            par1_limpio = par1.split(':')[0]
+            base1, quote1 = par1_limpio.split('/')
             m1 = base1 if quote1 == inicio else quote1
             if m1 not in simbolos_por_moneda: continue
             
             for par2 in simbolos_por_moneda[m1]:
                 if par2 == par1: continue
-                partes2 = par2.split(':')[0]
-                base2, quote2 = partes2.split('/')
+                par2_limpio = par2.split(':')[0]
+                base2, quote2 = par2_limpio.split('/')
                 m2 = base2 if quote2 == m1 else quote2
                 
                 for par3 in simbolos_por_moneda[m2]:
                     if par3 == par2 or par3 == par1: continue
-                    partes3 = par3.split(':')[0]
-                    base3, quote3 = partes3.split('/')
+                    par3_limpio = par3.split(':')[0]
+                    base3, quote3 = par3_limpio.split('/')
                     if base3 == inicio or quote3 == inicio:
                         ruta = (par1, par2, par3)
                         if ruta not in triangulos: 
@@ -82,12 +82,11 @@ def calcular_arbitraje(triangulo, tickers):
 
     for i, par in enumerate(triangulo):
         ticker = tickers.get(par)
-        # Si falta el ticker o los precios bid/ask, abortamos la ruta
         if not ticker or ticker.get('ask') is None or ticker.get('bid') is None: 
             return -999.0, ""
         
-        partes_par = par.split(':')[0]
-        base, quote = partes_par.split('/')
+        par_limpio = par.split(':')[0]
+        base, quote = par_limpio.split('/')
 
         # Simulación de ejecución pagando comisiones taker
         if moneda_actual == quote:
@@ -115,6 +114,10 @@ def ejecutar_bot():
         logger.info(f"Escaneando {len(triangulos)} combinaciones en contratos perpetuos OKX.")
         logger.info(f"Filtro de beneficio neto real establecido en: >+{MIN_PROFIT}%")
         
+        if len(triangulos) == 0:
+            logger.error("No se encontraron combinaciones triangulares. Apagando para evitar bucle infinito.")
+            return
+
         while True:
             try:
                 # Descarga masiva de tickers de OKX
@@ -123,7 +126,7 @@ def ejecutar_bot():
                 
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(tri, tickers)
-                    if -50.0 < profit < MAX_PROFIT: # Filtramos spreads aberrantes o errores de datos
+                    if -50.0 < profit < MAX_PROFIT:
                         resultados_vuelta.append((texto, profit))
 
                 # Ordenamos de mayor a menor beneficio detectado
@@ -136,27 +139,22 @@ def ejecutar_bot():
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        # Salto de línea para que el trade exitoso quede fijo en el historial de la consola
-                        print("") 
+                        print("") # Salto de línea para fijar el acierto en Railway
                         logger.info(f"💰 [FUTUROS REALIZADO #{TOTAL_TRADES}] Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
                     else:
-                        # Muestra el estado en una sola línea dinámica para no saturar tu pantalla de logs repetitivos
-                        sys.stdout.write(f"\r🔍 Escaneando... Mejor Spread: {mejor_profit:.4f}% | Saldo Actual: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
-                        sys.stdout.flush()
+                        # Registro limpio en logs para evitar que Railway sature el almacenamiento
+                        logger.info(f"Scan... Max: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
                 
             except ccxt.RateLimitExceeded:
-                # Si OKX nos frena el tráfico, dormimos el bot para evitar un baneo de IP permanente
-                print("")
-                logger.warning("⚠️ ¡Rate Limit de OKX alcanzado! Esperando 15 segundos para enfriar la API...")
+                logger.warning("⚠️ ¡Rate Limit de OKX alcanzado! Esperando 15 segundos...")
                 time.sleep(15)
                 
             except Exception as e:
-                print("")
                 logger.error(f"Error en ciclo perpetuo: {e}")
                 time.sleep(2)
                 
-            # Margen de seguridad para proteger los límites de peticiones HTTP de OKX
-            time.sleep(1.5)
+            # Tiempo de espera optimizado para el plan de Railway y límites de OKX
+            time.sleep(2.0)
 
     except Exception as e:
         logger.error(f"Fallo crítico en el motor perpetuo: {e}")
