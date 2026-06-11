@@ -19,7 +19,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-# --- CONFIGURACIÓN PRINCIPAL ---
 MODO_REAL = False  
 TAKER_FEE_PERPETUAL = 0.0005   
 MIN_PROFIT = 0.02              
@@ -30,12 +29,10 @@ TOTAL_TRADES = 4
 DICCIONARIO_MERCADOS = {}
 MONEDAS_TOP = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'USDT']
 
-# Variables globales compartidas con el Dashboard
 ULTIMO_SPREAD = 0.0
 ULTIMA_RUTA = "Ninguna"
 ULTIMO_REFRESCO = "Nunca"
 
-# Listas en memoria para almacenar el historial de transacciones (Máximo 5 para ahorrar RAM)
 HISTORIAL_EXITOSAS = [
     {"hora": "Histórico", "ruta": "Ruta inicial de simulación", "profit": 0.2200},
     {"hora": "Histórico", "ruta": "Ruta inicial de simulación", "profit": 0.1850},
@@ -45,7 +42,6 @@ HISTORIAL_EXITOSAS = [
 HISTORIAL_RECHAZADAS = []
 
 class DashboardServer(BaseHTTPRequestHandler):
-    """Servidor web ultraligero con registro de transacciones integrado"""
     def do_GET(self):
         global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO
         global HISTORIAL_EXITOSAS, HISTORIAL_RECHAZADAS
@@ -55,7 +51,6 @@ class DashboardServer(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         
-        # Generar bloques HTML para transacciones exitosas
         html_exitosas = ""
         for t in reversed(HISTORIAL_EXITOSAS):
             html_exitosas += f"""
@@ -65,7 +60,6 @@ class DashboardServer(BaseHTTPRequestHandler):
             </div>
             """
             
-        # Generar bloques HTML para oportunidades rechazadas
         html_rechazadas = ""
         if not HISTORIAL_RECHAZADAS:
             html_rechazadas = "<p style='color:#666; font-size:12px;'>Sincronizando mercado...</p>"
@@ -125,6 +119,7 @@ class DashboardServer(BaseHTTPRequestHandler):
         </html>
         """
         self.send_header("Content-Length", str(len(html.encode("utf-8"))))
+        self.end_headers()
         self.wfile.write(html.encode("utf-8"))
 
     def log_message(self, format, *args): return
@@ -132,7 +127,7 @@ class DashboardServer(BaseHTTPRequestHandler):
 def iniciar_dashboard():
     puerto = int(os.getenv("PORT", 8080))
     server = HTTPServer(("0.0.0.0", puerto), DashboardServer)
-    logger.info(f"🌐 Servidor de historial web activo en puerto {puerto}")
+    logger.info(f"🌐 Servidor activo en puerto {puerto}")
     server.serve_forever()
 
 def inicializar_okx():
@@ -214,5 +209,9 @@ def ejecutar_bot():
                         TOTAL_TRADES += 1
                         ganancia_trade = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia_trade
-                        
-                        # Añadir al historial de exitosas y limitar a los últimos 5 registros
+                        HISTORIAL_EXITOSAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
+                        if len(HISTORIAL_EXITOSAS) > 5: HISTORIAL_EXITOSAS.pop(0)
+                        logger.info(f"💰 ¡TRADE SIMULADO DETECTADO! Ruta: {mejor_ruta_texto}")
+                    else:
+                        HISTORIAL_RECHAZADAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
+                        if len(HISTORIAL_RECHAZADAS) > 5: HISTORIAL_RECHAZADAS.pop(0)
