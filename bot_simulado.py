@@ -25,14 +25,12 @@ CAPITAL_INICIAL = 50.82
 CAPITAL_SIMULADO = 50.82  
 TOTAL_TRADES = 4               
 
-# Глобален речник за бърз достъп до структурата на пазарите
 DICCIONARIO_MERCADOS = {}
 
 def inicializar_okx():
-    """Инициализира OKX и конфигурира акаунта в мултивалутен режим при MODO_REAL."""
+    """Инициализира OKX без филтри за пазара на старта."""
     config = {
         'enableRateLimit': True,
-        'options': {'defaultType': 'swap'} 
     }
     
     if MODO_REAL:
@@ -42,41 +40,40 @@ def inicializar_okx():
         config['password'] = os.getenv('OKX_PASSWORD')   
         
         exchange = ccxt.okx(config)
-        
         try:
             logger.info("🔧 Configurando cuenta de OKX en modo Multi-Moneda...")
             exchange.private_post_account_set_account_position_mode({'acctLv': '2'})
-            logger.info("✅ Modo Multi-Moneda verificado y activado exitosamente.")
+            logger.info("✅ Modo Multi-Moneda verificado и activado exitosamente.")
         except Exception as e:
-            logger.warning(f"⚠️ No se pudo forzar el modo de cuenta mediante API: {e}.")
-        
+            logger.warning(f"⚠️ No se pudo forzar el modo de cuenta: {e}.")
         return exchange
     else:
         return ccxt.okx(config)
 
 def buscar_todos_los_triangulos(markets):
-    """Търси триъгълници, използвайки вградените base и quote данни от CCXT."""
+    """Намира триъгълници, комбинирайки Спот мостове и Фючърси."""
     global DICCIONARIO_MERCADOS
-    pares_swap = []
+    pares_validos = []
     
     for symbol, market in markets.items():
-        # Взимаме само активни фючърси (swap), които се разплащат в USDT
-        is_swap = market.get('swap', False)
         is_active = market.get('active', True)
-        settle_usdt = market.get('settle') == 'USDT'
+        is_spot = market.get('spot', False)
+        is_swap = market.get('swap', False)
+        settle_usdt = market.get('settle') == 'USDT' or market.get('quote') == 'USDT'
         
-        if is_swap and is_active and settle_usdt:
-            pares_swap.append(symbol)
-            # Запазваме base и quote в глобалния речник
+        # Приемаме както USDT фючърси, така и всички спот двойки за мостове
+        if is_active and (is_spot or (is_swap and settle_usdt)):
+            pares_validos.append(symbol)
             DICCIONARIO_MERCADOS[symbol] = {
                 'base': market['base'],
-                'quote': market['quote']
+                'quote': market['quote'],
+                'type': 'swap' if is_swap else 'spot'
             }
             
-    logger.info(f"Намерени суап пазари в OKX: {len(pares_swap)}")
+    logger.info(f"Общо заредени пазари (Спот + Фючърс): {len(pares_validos)}")
     
     simbolos_por_moneda = {}
-    for par in pares_swap:
+    for par in pares_validos:
         base = DICCIONARIO_MERCADOS[par]['base']
         quote = DICCIONARIO_MERCADOS[par]['quote']
         simbolos_por_moneda.setdefault(base, []).append(par)
@@ -84,9 +81,7 @@ def buscar_todos_los_triangulos(markets):
 
     triangulos = []
     inicio = 'USDT'
-    if inicio not in simbolos_por_moneda: 
-        logger.error("❌ Критично: USDT липсва в заредените валути!")
-        return []
+    if inicio not in simbolos_por_moneda: return []
 
     for par1 in simbolos_por_moneda[inicio]:
         base1 = DICCIONARIO_MERCADOS[par1]['base']
@@ -112,7 +107,7 @@ def buscar_todos_los_triangulos(markets):
     return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
-    """Изчислява потенциалната доходност без текстова обработка."""
+    """Изчислява доходността на хибридния триъгълник."""
     global DICCIONARIO_MERCADOS
     monto = 1.0  
     secuencia_texto = ""
@@ -124,23 +119,24 @@ def calcular_arbitraje(exchange, triangulo, tickers):
         
         base = DICCIONARIO_MERCADOS[par]['base']
         quote = DICCIONARIO_MERCADOS[par]['quote']
+        tipo = DICCIONARIO_MERCADOS[par]['type']
 
         if moneda_actual == quote:
             monto = (monto / (ticker['ask'] * 1.0001)) * (1 - TAKER_FEE_PERPETUAL)
-            secuencia_texto += base
+            secuencia_texto += f"{base}({tipo})"
             moneda_actual = base
         else:
             monto = (monto * (ticker['bid'] * 0.9999)) * (1 - TAKER_FEE_PERPETUAL)
-            secuencia_texto += quote
+            secuencia_texto += f"{quote}({tipo})"
             moneda_actual = quote
         if i < 2: secuencia_texto += ">"
 
     return (monto - 1.0) * 100, secuencia_texto
 
 def ejecutar_ordenes_reales(exchange, triangulo):
-    """Изпълнява 3 реални пазарни поръчки в OKX, изчислявайки договорите."""
+    """Изпълнява пазарни поръчки, съобразявайки дали двойката е Спот или Фючърс."""
     global DICCIONARIO_MERCADOS
-    logger.info(f"🚀 [OPERACIÓN REAL] Iniciando ejecución в OKX за маршрут: {triangulo}")
+    logger.info(f"🚀 [OPERACIÓN REAL] Ejecutando: {triangulo}")
     moneda_actual = "USDT"
     
     try:
@@ -153,49 +149,43 @@ def ejecutar_ordenes_reales(exchange, triangulo):
         for par in triangulo:
             base = DICCIONARIO_MERCADOS[par]['base']
             quote = DICCIONARIO_MERCADOS[par]['quote']
-            market = exchange.market(par)
-            contract_size = market['contractSize']  
+            tipo = DICCIONARIO_MERCADOS[par]['type']
             
-            try:
-                exchange.set_leverage(1, par)  
-            except Exception:
-                pass
-
             ticker = exchange.fetch_ticker(par)
             
-            if moneda_actual == quote:
-                precio = ticker['ask']
-                cantidad_base = capital_flujo / precio
-                contratos = int(cantidad_base / contract_size)
+            if tipo == 'swap':
+                market = exchange.market(par)
+                contract_size = market['contractSize']
+                precio = ticker['ask'] if moneda_actual == quote else ticker['bid']
+                contratos = int((capital_flujo / precio) / contract_size) if moneda_actual == quote else int(capital_flujo / contract_size)
                 
-                if contratos < 1:
-                    logger.error(f"❌ По-малко от 1 договор за {par}")
-                    break
-
-                logger.info(f"🛒 COMPRA MERCADO: {par} | Contratos: {contratos}")
-                order = exchange.create_market_buy_order(par, contratos)
+                if contratos < 1: break
                 
-                capital_flujo = (contratos * contract_size)
-                moneda_actual = base
+                if moneda_actual == quote:
+                    exchange.create_market_buy_order(par, contratos)
+                    capital_flujo = (contratos * contract_size)
+                    moneda_actual = base
+                else:
+                    exchange.create_market_sell_order(par, contratos)
+                    capital_flujo = (contratos * contract_size) * precio
+                    moneda_actual = quote
             else:
-                precio = ticker['bid']
-                contratos = int(capital_flujo / contract_size)
-                
-                if contratos < 1:
-                    logger.error(f"❌ По-малко от 1 договор за {par}")
-                    break
-
-                logger.info(f"🔨 VENTA MERCADO: {par} | Contratos: {contratos}")
-                order = exchange.create_market_sell_order(par, contratos)
-                
-                capital_flujo = (contratos * contract_size) * precio
-                moneda_actual = quote
-                
-            time.sleep(0.05)  
-        logger.info("✅ Реалният триъгълен цикъл беше затворен.")
-        
+                # Изпълнение на Спот поръчка
+                precio = ticker['ask'] if moneda_actual == quote else ticker['bid']
+                if moneda_actual == quote:
+                    cantidad = capital_flujo / precio
+                    exchange.create_market_buy_order(par, cantidad)
+                    capital_flujo = cantidad
+                    moneda_actual = base
+                else:
+                    exchange.create_market_sell_order(par, capital_flujo)
+                    capital_flujo = capital_flujo * precio
+                    moneda_actual = quote
+                    
+            time.sleep(0.05)
+        logger.info("✅ Цикълът приключи.")
     except Exception as e:
-        logger.error(f"❌ КРИТИЧНА ГРЕШКА ПРИ ТЪРГОВИЯ НА ЖИВО: {e}")
+        logger.error(f"❌ Грешка при изпълнение: {e}")
 
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
@@ -206,7 +196,7 @@ def ejecutar_bot():
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Estructura lista. Analizando {len(triangulos)} caminos de futuros perpetuos.")
+        logger.info(f"Estructura lista. Analizando {len(triangulos)} caminos mixtos.")
         
         while True:
             try:
