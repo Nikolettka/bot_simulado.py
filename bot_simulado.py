@@ -3,6 +3,7 @@ import threading
 import logging
 import ccxt
 import sys
+import os
 from flask import Flask
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -118,17 +119,17 @@ def bucle_bot_segundo():
                     if profit > -50.0:
                         resultados_vuelta.append((texto, profit))
 
-                resultados_vuelta.sort(key=lambda x: x[1], reverse=True)
+                resultados_vuelta.sort(key=lambda x: x, reverse=True)
                 top_3 = resultados_vuelta[:3]
                 
                 top_html = ""
                 for i, r in enumerate(top_3):
-                    color = "#02c076" if r[1] >= MIN_PROFIT else "#f84960"
-                    top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r[0]}</span><span style='color:{color};font-weight:bold;'>{r[1]:.4f}%</span></div>"
+                    color = "#02c076" if r >= MIN_PROFIT else "#f84960"
+                    top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r}</span><span style='color:{color};font-weight:bold;'>{r:.4f}%</span></div>"
                 data_compartida["top_rutas_texto"] = top_html
 
                 if top_3:
-                    mejor_ruta_texto, mejor_profit = top_3[0]
+                    mejor_ruta_texto, mejor_profit = top_3
                 else:
                     mejor_ruta_texto, mejor_profit = "N/A", 0.0
                     
@@ -161,74 +162,40 @@ def bucle_bot_segundo():
 
 app = Flask(__name__)
 
-# Diseño plano sin etiquetas anidadas de entornos web complejos
-html_template = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='utf-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>OKX ARBITRAGE PRO</title>
-    <script>
-        setInterval(function(){{ window.location.reload(); }}, 1200);
-    </script>
-    <style>
-        body {{ background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }}
-        .card {{ background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }}
-        .grid {{ display: flex; gap: 10px; margin-top: 12px; }}
-        .col {{ flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }}
-        .label {{ color: #848e9c; font-size: 12px; }}
-        .value {{ font-size: 18px; font-weight: bold; margin-top: 4px; }}
-        .btn {{ display: inline-block; background-color: %s; color: white; padding: 10px 30px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-top: 10px; }}
-    </style>
-</head>
-<body>
-    <h2 style='text-align:center;color:#eaecef;border-bottom:1px solid #2b3139;padding-bottom:10px;margin:0;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
-    
-    <!-- CONTROL DE INTERRUPTOR VISIBLE -->
-    <div class='card' style='text-align:center;'>
-        <div class='label'>Estado del Sistema</div>
-        <div style='font-size:16px; font-weight:bold; margin-top:5px; color:%s;'>%s</div>
-        <a class='btn' href='/toggle'>%s MOTOR</a>
-    </div>
+@app.route('/')
+def home():
+    color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
+    c_btn = "#f84960" if BOT_ENCENDIDO else "#02c076"
+    c_est = "#02c076" if BOT_ENCENDIDO else "#f84960"
+    t_est = "SISTEMA ACTIVO / CORRIENDO" if BOT_ENCENDIDO else "SISTEMA DETENIDO / EN PAUSA"
+    t_btn = "APAGAR" if BOT_ENCENDIDO else "ENCENDER"
 
-    <div class='card' style='text-align:center;'>
-        <div class='label'>Capital Simulado Disponible</div>
-        <div style='color:#02c076;font-size:34px;font-weight:bold;margin-top:5px;'>$%s USDT</div>
-    </div>
-    
-    <div class='grid'>
-        <div class='col'>
-            <div class='label'>Spread Maximo</div>
-            <div class='value' style='color:%s;'>%s%%</div>
-        </div>
-        <div class='col'>
-            <div class='label'>Filtro Minimo</div>
-            <div class='value' style='color:#f0b90b;'>+%s%%</div>
-        </div>
-    </div>
+    try:
+        # Прочитане на изнесения външен HTML шаблон
+        with open('index.html', 'r', encoding='utf-8') as f:
+            html_template = f.read()
+    except Exception:
+        return "Error cargando index.html"
 
-    <div class='card'>
-        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Mas Rentables OKX</div>
-        %s
-    </div>
+    return html_template % (
+        c_btn, c_est, t_est, t_btn,
+        f"{data_compartida['capital_actual']:.2f}",
+        color_profit, f"{data_compartida['mejor_profit']:.4f}", f"{MIN_PROFIT:.1f}",
+        data_compartida['top_rutas_texto'],
+        f"{data_compartida['record_max_profit']:.4f}", f"{data_compartida['record_min_profit']:.4f}",
+        f"{data_compartida['total_triangulos']:,}",
+        f"{data_compartida['tiempo_escaneo']:.2f}", f"{data_compartida['tamano_peticion_kb']:.1f}", f"{data_compartida['total_datos_mb']:.2f}",
+        data_compartida['transacciones_texto']
+    )
 
-    <div class='card'>
-        <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesion)</div>
-        <div style='display:flex;justify-content:space-between;font-size:13px;'>
-            <div><span class='label'>Max Spread:</span> <b style='color:#02c076;'>%s%%</b></div>
-            <div><span class='label'>Min Spread:</span> <b style='color:#f84960;'>%s%%</b></div>
-        </div>
-    </div>
+@app.route('/toggle')
+def toggle_bot():
+    global BOT_ENCENDIDO
+    BOT_ENCENDIDO = not BOT_ENCENDIDO
+    return "<html><head><script>window.location.href='/';</script></head><body></body></html>"
 
-    <div class='card'>
-        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetria и Trafico de Red</div>
-        <div style='font-size:12px; display:grid; grid-template-columns:1fr 1fr; gap:6px;'>
-            <div><span class='label'>Rutas:</span> <b>%s</b></div>
-            <div><span class='label'>Latencia:</span> <b>%s s</b></div>
-            <div><span class='label'>Peso API:</span> <b>%s KB</b></div>
-            <div><span class='label'>Total Red:</span> <b>%s MB</b></div>
-        </div>
-    </div>
-
-    <div class='card'>
+if __name__ == "__main__":
+    hilo_bot = threading.Thread(target=bucle_bot_segundo)
+    hilo_bot.daemon = True
+    hilo_bot.start()
+    app.run(host='0.0.0.0', port=8080, debug=False)
