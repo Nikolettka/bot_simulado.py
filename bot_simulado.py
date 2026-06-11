@@ -13,7 +13,7 @@ logger = logging.getLogger()
 
 # --- PARÁMETROS DEL MOTOR ---
 TAKER_FEE = 0.0010       
-MIN_PROFIT = 0.31        # Cubre 0.30% de comisiones triples y asegura ganancia neta
+MIN_PROFIT = 0.31        
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.0
 CAPITAL_SIMULADO = 50.0  
@@ -76,7 +76,7 @@ def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx_publico()
     
-    logger.info("REINICIANDO MOTOR CON MONITOREO DE RECHAZOS")
+    logger.info("REINICIANDO MOTOR: VISUALIZACIÓN DE SALDO EN TIEMPO REAL")
     
     try:
         markets = exchange.load_markets()
@@ -96,22 +96,20 @@ def ejecutar_bot():
                 resultados_vuelta.sort(key=lambda x: x, reverse=True)
                 
                 if resultados_vuelta:
-                    mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                    mejor_ruta_texto, mejor_profit = resultados_vuelta
                     
                     if mejor_profit >= MIN_PROFIT:
-                        # Oportunidad aceptada y ejecutada
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ¡TRADE EJECUTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Balance: ${CAPITAL_SIMULADO:.2f} USDT")
+                        logger.info(f"💰 ¡TRADE EJECUTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
                     else:
-                        # NUEVA LÓGICA: Muestra la oportunidad rechazada en el log interno
-                        logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Motivo: No supera el +{MIN_PROFIT}% mínimo")
+                        # MODIFICACIÓN CLAVE: Ahora añade el saldo actual retenido en cada log de rechazo
+                        logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
                 
             except Exception as e:
                 logger.error(f"Error en ciclo: {e}")
                 
-            # Escaneo a alta velocidad cada 0.5 segundos
             time.sleep(0.5)
 
     except Exception as e:
