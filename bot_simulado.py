@@ -4,7 +4,7 @@ import logging
 import ccxt
 import sys
 import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import socket
 
 root = logging.getLogger()
 if root.handlers:
@@ -41,92 +41,94 @@ HISTORIAL_EXITOSAS = [
 ]
 HISTORIAL_RECHAZADAS = []
 
-class DashboardServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO
-        global HISTORIAL_EXITOSAS, HISTORIAL_RECHAZADAS
-        
-        self.send_response(200)
-        self.send_header("Content-type", "text/html; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.end_headers() # CORRECCIÓN CRÍTICA: Envía las cabeceras HTTP correctamente
-        
-        html_exitosas = ""
-        for t in reversed(HISTORIAL_EXITOSAS):
-            html_exitosas += f"""
-            <div style="border-left: 4px solid #00ff66; background: #252525; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 12px; text-align: left;">
-                <span style="color: #888;">[{t['hora']}]</span> <span style="color: #00ff66; font-weight:bold;">+{t['profit']:.4f}%</span><br>
-                <span style="color: #ddd;">{t['ruta']}</span>
-            </div>
-            """
-            
-        html_rechazadas = ""
-        if not HISTORIAL_RECHAZADAS:
-            html_rechazadas = "<p style='color:#666; font-size:12px;'>Sincronizando mercado...</p>"
-        for r in reversed(HISTORIAL_RECHAZADAS):
-            html_rechazadas += f"""
-            <div style="border-left: 4px solid #ff3333; background: #252525; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 11px; text-align: left;">
-                <span style="color: #888;">[{r['hora']}]</span> <span style="color: #ff3333;">{r['profit']:.4f}%</span><br>
-                <span style="color: #aaa;">{r['ruta']}</span>
-            </div>
-            """
-        
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>OKX Arbitrage Bot</title>
-            <style>
-                body {{ background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; padding: 15px; margin:0; }}
-                .card {{ background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 12px auto; max-width: 420px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
-                h1 {{ color: #00ffcc; font-size: 22px; margin-bottom: 5px; }}
-                h3 {{ margin-top: 0; color: #ffcc00; font-size: 16px; border-bottom: 1px solid #333; padding-bottom: 5px; }}
-                .profit {{ color: #00ff66; font-size: 26px; font-weight: bold; }}
-                .spread {{ color: #ffcc00; font-size: 18px; font-weight: bold; }}
-                .btn {{ background-color: #00ffcc; color: #121212; padding: 12px 25px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; margin: 10px 0; width: 80%; max-width: 300px; }}
-            </style>
-        </head>
-        <body>
-            <h1>🤖 OKX BOT DASHBOARD</h1>
-            <p style="color: #aaa; font-size: 11px; margin-top:0;">Operando en la nube 24/7. Datos bajo demanda.</p>
-            
-            <div class="card">
-                <h3 style="color: #00ff66; border-color: #00ff66;">💰 SALDO SIMULADO</h3>
-                <div class="profit">${CAPITAL_SIMULADO:.2f} USDT</div>
-                <p style="margin: 5px 0 0 0; color: #aaa; font-size: 14px;">Operaciones totales: {TOTAL_TRADES}</p>
-            </div>
-            
-            <div class="card">
-                <h3>📊 ANÁLISIS EN TIEMPO REAL</h3>
-                <div class="spread">Mejor Spread: {ULTIMO_SPREAD:.4f}%</div>
-                <p style="font-size: 12px; color: #00ffcc; margin: 5px 0;">Ruta: {ULTIMA_RUTA}</p>
-                <p style="font-size: 10px; color: #888; margin: 0;">Último escaneo: {ULTIMO_REFRESCO}</p>
-            </div>
-
-            <div class="card">
-                <h3 style="color: #00ff66; border-color: #00ff66;">✅ ÚLTIMAS OPERACIONES (EXITOSAS)</h3>
-                {html_exitosas}
-            </div>
-
-            <div class="card">
-                <h3 style="color: #ff3333; border-color: #ff3333;">❌ OPORTUNIDADES DETECTADAS (RECHAZADAS)</h3>
-                {html_rechazadas}
-            </div>
-            
-            <a href="" class="btn">🔄 ACTUALIZAR PANEL</a>
-        </body>
-        </html>
-        """
-        self.wfile.write(html.encode("utf-8"))
-
-    def log_message(self, format, *args): return
-
 def iniciar_dashboard():
+    """Servidor Socket directo: Imposible de colgar, responde instantáneamente al proxy."""
+    global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO
+    global HISTORIAL_EXITOSAS, HISTORIAL_RECHAZADAS
+    
     puerto = int(os.getenv("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", puerto), DashboardServer)
-    logger.info(f"🌐 Servidor activo en puerto {puerto}")
-    server.serve_forever()
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("0.0.0.0", puerto))
+    s.listen(5)
+    logger.info(f"🌐 Servidor Socket ultrarrápido activo en puerto {puerto}")
+    
+    while True:
+        try:
+            conn, addr = s.accept()
+            request = conn.recv(1024)
+            
+            html_exitosas = ""
+            for t in reversed(HISTORIAL_EXITOSAS):
+                html_exitosas += f"""
+                <div style="border-left: 4px solid #00ff66; background: #252525; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 12px; text-align: left;">
+                    <span style="color: #888;">[{t['hora']}]</span> <span style="color: #00ff66; font-weight:bold;">+{t['profit']:.4f}%</span><br>
+                    <span style="color: #ddd;">{t['ruta']}</span>
+                </div>
+                """
+                
+            html_rechazadas = ""
+            if not HISTORIAL_RECHAZADAS:
+                html_rechazadas = "<p style='color:#666; font-size:12px;'>Sincronizando mercado...</p>"
+            for r in reversed(HISTORIAL_RECHAZADAS):
+                html_rechazadas += f"""
+                <div style="border-left: 4px solid #ff3333; background: #252525; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 11px; text-align: left;">
+                    <span style="color: #888;">[{r['hora']}]</span> <span style="color: #ff3333;">{r['profit']:.4f}%</span><br>
+                    <span style="color: #aaa;">{r['ruta']}</span>
+                </div>
+                """
+            
+            body = f"""<!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>OKX Arbitrage Bot</title>
+                <style>
+                    body {{ background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; padding: 15px; margin:0; }}
+                    .card {{ background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 12px auto; max-width: 420px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
+                    h1 {{ color: #00ffcc; font-size: 22px; margin-bottom: 5px; }}
+                    h3 {{ margin-top: 0; color: #ffcc00; font-size: 16px; border-bottom: 1px solid #333; padding-bottom: 5px; }}
+                    .profit {{ color: #00ff66; font-size: 26px; font-weight: bold; }}
+                    .spread {{ color: #ffcc00; font-size: 18px; font-weight: bold; }}
+                    .btn {{ background-color: #00ffcc; color: #121212; padding: 12px 25px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; margin: 10px 0; width: 80%; max-width: 300px; }}
+                </style>
+            </head>
+            <body>
+                <h1>🤖 OKX BOT DASHBOARD</h1>
+                <p style="color: #aaa; font-size: 11px; margin-top:0;">Operando en la nube 24/7. Datos bajo demanda.</p>
+                
+                <div class="card">
+                    <h3 style="color: #00ff66; border-color: #00ff66;">💰 SALDO SIMULADO</h3>
+                    <div class="profit">${CAPITAL_SIMULADO:.2f} USDT</div>
+                    <p style="margin: 5px 0 0 0; color: #aaa; font-size: 14px;">Operaciones totales: {TOTAL_TRADES}</p>
+                </div>
+                
+                <div class="card">
+                    <h3>📊 ANÁLISIS EN TIEMPO REAL</h3>
+                    <div class="spread">Mejor Spread: {ULTIMO_SPREAD:.4f}%</div>
+                    <p style="font-size: 12px; color: #00ffcc; margin: 5px 0;">Ruta: {ULTIMA_RUTA}</p>
+                    <p style="font-size: 10px; color: #888; margin: 0;">Último escaneo: {ULTIMO_REFRESCO}</p>
+                </div>
+
+                <div class="card">
+                    <h3 style="color: #00ff66; border-color: #00ff66;">✅ ÚLTIMAS OPERACIONES (EXITOSAS)</h3>
+                    {html_exitosas}
+                </div>
+
+                <div class="card">
+                    <h3 style="color: #ff3333; border-color: #ff3333;">❌ OPORTUNIDADES DETECTADAS (RECHAZADAS)</h3>
+                    {html_rechazadas}
+                </div>
+                
+                <a href="" class="btn">🔄 ACTUALIZAR PANEL</a>
+            </body>
+            </html>"""
+            
+            response = f"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {len(body.encode('utf-8'))}\r\nConnection: close\r\n\r\n{body}"
+            conn.sendall(response.encode("utf-8"))
+            conn.close()
+        except Exception:
+            pass
 
 def inicializar_okx():
     return ccxt.okx({'enableRateLimit': True})
@@ -211,11 +213,3 @@ def ejecutar_bot():
                         HISTORIAL_EXITOSAS.pop(0)
                     logger.info(f"TRADE OK: {mejor_ruta_texto}")
                 else:
-                    HISTORIAL_RECHAZADAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
-                    if len(HISTORIAL_RECHAZADAS) > 5:
-                        HISTORIAL_RECHAZADAS.pop(0)
-                    logger.info(f"Scan... | Max: {mejor_profit:.4f}%")
-            time.sleep(2.0)
-    except Exception as e:
-        logger.error(f"Fallo: {e}")
-
