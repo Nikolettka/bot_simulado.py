@@ -3,7 +3,7 @@ import threading
 import logging
 import ccxt
 import sys
-from flask import Flask
+from flask import Flask, render_template_string
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
@@ -152,82 +152,85 @@ def bucle_bot_segundo():
 
 app = Flask(__name__)
 
+# Сигурен HTML шаблон без форматиращи конфликти
+html_template = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>OKX ARBITRAGE ULTRA PRO</title>
+    <meta http-equiv='refresh' content='1'>
+    <style>
+        body { background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }
+        .card { background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }
+        .grid { display: flex; gap: 10px; margin-top: 12px; }
+        .col { flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }
+        .label { color: #848e9c; font-size: 12px; }
+        .value { font-size: 18px; font-weight: bold; margin-top: 4px; }
+        .telemetria { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h2 style='text-align:center;color:#eaecef;border-bottom:1px solid #2b3139;padding-bottom:10px;margin:0;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
+    
+    <div class='card' style='text-align:center;'>
+        <div class='label'>Capital Simulado Disponible</div>
+        <div style='color:#02c076;font-size:36px;font-weight:bold;margin-top:5px;'>${{ "%.2f"|format(capital) }} USDT</div>
+    </div>
+    
+    <div class='grid'>
+        <div class='col'>
+            <div class='label'>Spread Maximo</div>
+            <div class='value' style='color:{{ color_p }};'>{{ "%.4f"|format(profit) }}%</div>
+        </div>
+        <div class='col'>
+            <div class='label'>Filtro Minimo</div>
+            <div class='value' style='color:#f0b90b;'>+{{ min_p }}%</div>
+        </div>
+    </div>
+
+    <div class='card'>
+        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Mas Rentables OKX</div>
+        {{ top_3|safe }}
+    </div>
+
+    <div class='card'>
+        <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesion)</div>
+        <div style='display:flex;justify-content:space-between;font-size:13px;'>
+            <div><span class='label'>Max Spread:</span> <span style='color:#02c076;font-weight:bold;'>{{ "%.4f"|format(r_max) }}%</span></div>
+            <div><span class='label'>Min Spread:</span> <span style='color:#f84960;font-weight:bold;'>{{ "%.4f"|format(r_min) }}%</span></div>
+        </div>
+    </div>
+
+    <div class='card'>
+        <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetria y Trafico de Red</div>
+        <div class='telemetria'>
+            <div><span class='label'>Rutas:</span> <b>{{ "{:,}".format(rutas) }}</b></div>
+            <div><span class='label'>Latencia:</span> <b>{{ "%.2f"|format(latencia) }}s</b></div>
+            <div><span class='label'>Peticion:</span> <b>{{ "%.1f"|format(peso) }} KB</b></div>
+            <div><span class='label'>Total Red:</span> <b>{{ "%.2f"|format(total_r) }} MB</b></div>
+        </div>
+    </div>
+
+    <div class='card'>
+        <div class='label' style='border-bottom:1px solid #2b3139;padding-bottom:6px;margin-bottom:8px;font-weight:bold;color:#eaecef;'>📜 Registro de Operaciones Exitosas</div>
+        {{ trades|safe }}
+    </div>
+</body>
+</html>
+"""
+
 @app.route('/')
 def home():
     color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
     
-    # Шаблонът вече използва стандартни HTML тагове без конфликти с Python форматирането
-    html_template = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset='utf-8'>
-        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-        <title>OKX ARBITRAGE ULTRA PRO</title>
-        <meta http-equiv='refresh' content='1'>
-        <style>
-            body { background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }
-            .card { background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }
-            .grid { display: flex; gap: 10px; margin-top: 12px; }
-            .col { flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }
-            .label { color: #848e9c; font-size: 12px; }
-            .value { font-size: 18px; font-weight: bold; margin-top: 4px; }
-            .telemetria { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }
-        </style>
-    </head>
-    <body>
-        <h2 style='text-align:center;color:#eaecef;border-bottom:1px solid #2b3139;padding-bottom:10px;margin:0;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
-        
-        <div class='card' style='text-align:center;'>
-            <div class='label'>Capital Simulado Disponible</div>
-            <div style='color:#02c076;font-size:36px;font-weight:bold;margin-top:5px;'>${capital:.2f} USDT</div>
-        </div>
-        
-        <div class='grid'>
-            <div class='col'>
-                <div class='label'>Spread Maximo</div>
-                <div class='value' style='color:{color_p};'>{profit:.4f}%</div>
-            </div>
-            <div class='col'>
-                <div class='label'>Filtro Minimo</div>
-                <div class='value' style='color:#f0b90b;'>+{min_p}%</div>
-            </div>
-        </div>
-
-        <div class='card'>
-            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Mas Rentables OKX</div>
-            {top_3}
-        </div>
-
-        <div class='card'>
-            <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesion)</div>
-            <div style='display:flex;justify-content:space-between;font-size:13px;'>
-                <div><span class='label'>Max Spread:</span> <span style='color:#02c076;font-weight:bold;'>{r_max:.4f}%</span></div>
-                <div><span class='label'>Min Spread:</span> <span style='color:#f84960;font-weight:bold;'>{r_min:.4f}%</span></div>
-            </div>
-        </div>
-
-        <div class='card'>
-            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetria y Trafico de Red</div>
-            <div class='telemetria'>
-                <div><span class='label'>Rutas:</span> <b>{rutas:,}</b></div>
-                <div><span class='label'>Latencia:</span> <b>{latencia:.2f}s</b></div>
-                <div><span class='label'>Peticion:</span> <b>{peso:.1f} KB</b></div>
-                <div><span class='label'>Total Red:</span> <b>{total_r:.2f} MB</b></div>
-            </div>
-        </div>
-
-        <div class='card'>
-            <div class='label' style='border-bottom:1px solid #2b3139;padding-bottom:6px;margin-bottom:8px;font-weight:bold;color:#eaecef;'>📜 Registro de Operaciones Exitosas</div>
-            {trades}
-        </div>
-    </body>
-    </html>
-    """
-    
-    # Безопасно вграждане на променливите без f-string конфликти
-    return html_template.format(
+    return render_template_string(
+        html_template,
         capital=data_compartida['capital_actual'],
         color_p=color_profit,
         profit=data_compartida['mejor_profit'],
         min_p=MIN_PROFIT,
+        top_3=data_compartida['top_rutas_texto'],
+        r_max=data_compartida['record_max_profit'],
+        r_min=data_compartida['record_min_profit'],
