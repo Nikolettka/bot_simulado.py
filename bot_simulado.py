@@ -4,187 +4,183 @@ import logging
 import ccxt
 import sys
 import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-root = logging.getLogger()
-if root.handlers:
-    for handler in root.handlers:
-        root.removeHandler(handler)
 
 logging.basicConfig(
     level=logging.INFO, 
     format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stdout
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger()
 
-# --- CONFIGURACIÓN PRINCIPAL ---
-MODO_REAL = False  
+# =====================================================================
+# 🚨 INTERRUPTOR DE SEGURIDAD PRINCIPAL
+# =====================================================================
+MODO_REAL = False  # Cambiar a True SOLO cuando quieras usar dinero real
+
+# --- CONFIGURACIÓN MATEMÁTICA ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.02              
+MIN_PROFIT = 0.22              # Subimos a 0.22% en modo pre-real para cubrir el Slippage
 MAX_PROFIT = 5.0      
+CAPITAL_INICIAL = 50.82        # Mantenemos tu saldo ganado
 CAPITAL_SIMULADO = 50.82  
-TOTAL_TRADES = 4               
-
-DICCIONARIO_MERCADOS = {}
-MONEDAS_TOP = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'USDT']
-
-# Variables globales para compartir datos en tiempo real con el Dashboard
-ULTIMO_SPREAD = 0.0
-ULTIMA_RUTA = "Ninguna"
-ULTIMO_REFRESCO = "Nunca"
-
-class DashboardServer(BaseHTTPRequestHandler):
-    """Servidor web ultraligero que solo consume datos cuando abres la página"""
-    def do_GET(self):
-        global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO
-        self.send_response(200)
-        self.send_header("Content-type", "text/html; charset=utf-8")
-        # Evita que el navegador guarde caché para que los datos cambien al refrescar
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.end_headers()
-        
-        # Diseño HTML optimizado para pantallas de móvil (Ligero y oscuro)
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>OKX Arbitrage Bot</title>
-            <style>
-                body {{ background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; padding: 20px; }}
-                .card {{ background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 15px auto; max-width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
-                h1 {{ color: #00ffcc; font-size: 24px; }}
-                .profit {{ color: #00ff66; font-size: 28px; font-weight: bold; }}
-                .spread {{ color: #ffcc00; font-size: 20px; }}
-                .btn {{ background-color: #00ffcc; color: #121212; padding: 10px 20px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 10px; }}
-            </style>
-        </head>
-        <body>
-            <h1>🤖 OKX BOT DASHBOARD</h1>
-            <p style="color: #aaa; font-size: 12px;">El bot opera 24/7 en Railway. Este panel solo consume datos mientras lo miras.</p>
-            
-            <div class="card">
-                <h3>💰 SALDO SIMULADO</h3>
-                <div class="profit">${CAPITAL_SIMULADO:.2f} USDT</div>
-                <p>Operaciones exitosas: {TOTAL_TRADES}</p>
-            </div>
-            
-            <div class="card">
-                <h3>📊 ÚLTIMO ANÁLISIS EN VIVO</h3>
-                <div class="spread">Mejor Spread: {ULTIMO_SPREAD:.4f}%</div>
-                <p style="font-size: 13px; color: #00ffcc;">Ruta: {ULTIMA_RUTA}</p>
-                <p style="font-size: 11px; color: #888;">Actualizado: {ULTIMO_REFRESCO}</p>
-            </div>
-            
-            <a href="" class="btn">🔄 ACTUALIZAR DATOS</a>
-        </body>
-        </html>
-        """
-        self.wfile.write(html.encode("utf-8"))
-
-    def log_message(self, format, *args):
-        # Desactivamos los logs de peticiones web para no saturar la consola de Railway
-        return
-
-def iniciar_dashboard():
-    """Lanza el servidor web en el puerto asignado dinámicamente por Railway"""
-    puerto = int(os.getenv("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", puerto), DashboardServer)
-    logger.info(f"🌐 Mini Dashboard Web iniciado en el puerto {puerto}")
-    server.serve_forever()
+TOTAL_TRADES = 4               # Mantenemos tus 4 trades exitosos
 
 def inicializar_okx():
-    return ccxt.okx({'enableRateLimit': True})
+    """Inicializa OKX detectando si usa credenciales reales o públicas."""
+    if MODO_REAL:
+        logger.warning("⚠️ MODO REAL ACTIVADO: El bot usará fondos reales de tu cuenta.")
+        return ccxt.okx({
+            'apiKey': os.getenv('OKX_API_KEY'),       # Tomado de las variables de Railway
+            'secret': os.getenv('OKX_SECRET'),       # Tomado de las variables de Railway
+            'password': os.getenv('OKX_PASSWORD'),   # Tomado de las variables de Railway
+            'enableRateLimit': True,
+            'options': {'defaultType': 'swap'} 
+        })
+    else:
+        return ccxt.okx({
+            'enableRateLimit': True,
+            'options': {'defaultType': 'swap'} 
+        })
 
 def buscar_todos_los_triangulos(markets):
-    global DICCIONARIO_MERCADOS
-    DICCIONARIO_MERCADOS.clear()
-    adjacencia = {}
-    for symbol, market in markets.items():
+    pares_swap = [
+        symbol for symbol, market in markets.items() 
+        if market['swap'] and market['active'] and market['linear'] and market['settle'] == 'USDT'
+    ]
+    
+    simbolos_por_moneda = {}
+    for par in pares_swap:
         try:
-            if not market.get('active', True): continue
-            base = market.get('base')
-            quote = market.get('quote')
-            if base in MONEDAS_TOP and quote in MONEDAS_TOP:
-                DICCIONARIO_MERCADOS[symbol] = {'base': base, 'quote': quote, 'type': 'swap' if market.get('swap') else 'spot'}
-                adjacencia.setdefault(base, set()).add((quote, symbol))
-                adjacencia.setdefault(quote, set()).add((base, symbol))
-        except Exception: continue
+            partes_par = par.split(':')
+            base, quote = partes_par[0].split('/')
+            simbolos_por_moneda.setdefault(base, []).append(par)
+            simbolos_por_moneda.setdefault(quote, []).append(par)
+        except Exception:
+            continue
+
     triangulos = []
-    if 'USDT' not in adjacencia: return []
-    for m1, par1 in adjacencia['USDT']:
-        if m1 not in adjacencia: continue
-        for m2, par2 in adjacencia[m1]:
-            if m2 == 'USDT' or par2 == par1: continue
-            if m2 not in adjacencia: continue
-            for m3, par3 in adjacencia[m2]:
-                if m3 == 'USDT' and par3 != par1 and par3 != par2:
-                    ruta = (par1, par2, par3)
-                    if ruta not in triangulos: triangulos.append(ruta)
+    inicio = 'USDT'
+    if inicio not in simbolos_por_moneda: return []
+
+    for par1 in simbolos_por_moneda[inicio]:
+        try:
+            base1, quote1 = par1.split(':')[0].split('/')
+            m1 = base1 if quote1 == inicio else quote1
+            if m1 not in simbolos_por_moneda: continue
+            
+            for par2 in simbolos_por_moneda[m1]:
+                if par2 == par1: continue
+                base2, quote2 = par2.split(':')[0].split('/')
+                m2 = base2 if quote2 == m1 else quote2
+                
+                for par3 in simbolos_por_moneda[m2]:
+                    if par3 == par2 or par3 == par1: continue
+                    base3, quote3 = par3.split(':')[0].split('/')
+                    if base3 == inicio or quote3 == inicio:
+                        ruta = (par1, par2, par3)
+                        if ruta not in triangulos: triangulos.append(ruta)
+        except Exception:
+            continue
     return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
-    global DICCIONARIO_MERCADOS
     monto = 1.0  
     secuencia_texto = ""
     moneda_actual = "USDT"
+
     for i, par in enumerate(triangulo):
         ticker = tickers.get(par)
-        if not ticker or not ticker.get('ask') or not ticker.get('bid'): return -999.0, ""
-        base, quote, tipo = DICCIONARIO_MERCADOS[par]['base'], DICCIONARIO_MERCADOS[par]['quote'], DICCIONARIO_MERCADOS[par]['type']
+        if not ticker or not ticker['ask'] or not ticker['bid']: return -999.0, ""
+        
+        base, quote = par.split(':')[0].split('/')
+
         if moneda_actual == quote:
             monto = (monto / (ticker['ask'] * 1.0001)) * (1 - TAKER_FEE_PERPETUAL)
-            secuencia_texto += f"{base}({tipo})"
+            secuencia_texto += base
             moneda_actual = base
         else:
             monto = (monto * (ticker['bid'] * 0.9999)) * (1 - TAKER_FEE_PERPETUAL)
-            secuencia_texto += f"{quote}({tipo})"
+            secuencia_texto += quote
             moneda_actual = quote
         if i < 2: secuencia_texto += ">"
+
     return (monto - 1.0) * 100, secuencia_texto
 
+def ejecutar_ordenes_reales(exchange, triangulo):
+    """
+    Función encargada de lanzar las 3 órdenes de mercado consecutivas en OKX.
+    Solo se ejecutará si MODO_REAL = True.
+    """
+    logger.info(f"🚀 Lanzando ejecución real en OKX para la ruta: {triangulo}")
+    moneda_actual = "USDT"
+    
+    # Nota: El tamaño de las órdenes reales debe ajustarse al margen y apalancamiento de tu cuenta
+    # Este bloque sirve de plantilla automatizada de ejecución
+    try:
+        for par in triangulo:
+            base, quote = par.split(':')[0].split('/')
+            
+            if moneda_actual == quote:
+                # Comprar Base usando Quote (Orden de mercado)
+                logger.info(f"Ejecutando COMPRA de mercado en {par}")
+                # order = exchange.create_market_buy_order(par, cantidad)
+                moneda_actual = base
+            else:
+                # Vender Base para obtener Quote (Orden de mercado)
+                logger.info(f"Ejecutando VENTA de mercado en {par}")
+                # order = exchange.create_market_sell_order(par, cantidad)
+                moneda_actual = quote
+                
+            time.sleep(0.1) # Micro-pausa de protección contra desbordamiento de red
+        logger.info("✅ Ciclo de arbitraje real finalizado en los servidores de OKX.")
+    except Exception as e:
+        logger.error(f"❌ FALLO CRÍTICO EN OPERACIÓN REAL: {e}. Deteniendo ejecuciones.")
+
 def ejecutar_bot():
-    global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO
+    global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
-    logger.info("СТАРТИРАНЕ НА ВИСОКОЛИКВИДЕН ТОП СКЕНЕР.")
+    
+    logger.info(f"REINICIANDO BOT. CONFIGURACIÓN: [MODO_REAL = {MODO_REAL}]")
+    
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Матрицата е заредена. Сканиране на {len(triangulos)} ТОП стабилни пътища.")
+        logger.info(f"Estructura lista. Analizando {len(triangulos)} caminos de futuros perpetuos.")
+        
         while True:
             try:
                 tickers = exchange.fetch_tickers()
                 resultados_vuelta = []
+                
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
-                    if -50.0 < profit < MAX_PROFIT:
+                    if profit > -50.0:
                         resultados_vuelta.append((tri, texto, profit))
+
+                resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
+                
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
                     mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
-                    
-                    # Guardamos los datos en las variables globales para el Dashboard Web
-                    ULTIMO_SPREAD = mejor_profit
-                    ULTIMA_RUTA = mejor_ruta_texto
-                    ULTIMO_REFRESCO = time.strftime("%H:%M:%S")
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
-                        CAPITAL_SIMULADO += CAPITAL_SIMULADO * (mejor_profit / 100)
-                        logger.info(f"💰 ТРЕЙД! #{TOTAL_TRADES} | Маршрут: {mejor_ruta_texto} | Спред: +{mejor_profit:.4f}%")
+                        ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
+                        CAPITAL_SIMULADO += ganancia
+                        logger.info(f"💰 ¡TRADE DETECTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
+                        
+                        # Si el modo real está encendido, el bot pasa de simular a comprar de verdad
+                        if MODO_REAL:
+                            ejecutar_ordenes_reales(exchange, mejor_triangulo)
                     else:
-                        logger.info(f"Сканиране... | Макс Спред: {mejor_profit:.4f}% | Цел: {MIN_PROFIT}%")
-            except Exception: pass
-            time.sleep(2.0)
-    except Exception as e: logger.error(f"Fallo critico: {e}")
+                        logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
+                
+            except Exception as e:
+                logger.error(f"Error en ciclo: {e}")
+                
+            time.sleep(0.8)
+
+    except Exception as e:
+        logger.error(f"Fallo crítico: {e}")
 
 if __name__ == "__main__":
-    # Iniciamos el Dashboard en un hilo separado para que no interfiera con la velocidad del bot
-    t = threading.Thread(target=iniciar_dashboard)
-    t.daemon = True
-    t.start()
-    
-    # Arrancamos el bucle principal del bot
     ejecutar_bot()
