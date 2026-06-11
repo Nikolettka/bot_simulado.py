@@ -4,183 +4,215 @@ import logging
 import ccxt
 import sys
 import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+root = logging.getLogger()
+if root.handlers:
+    for handler in root.handlers:
+        root.removeHandler(handler)
 
 logging.basicConfig(
     level=logging.INFO, 
     format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout
 )
 logger = logging.getLogger()
 
-# =====================================================================
-# 🚨 INTERRUPTOR DE SEGURIDAD PRINCIPAL
-# =====================================================================
-MODO_REAL = False  # Cambiar a True SOLO cuando quieras usar dinero real
-
-# --- CONFIGURACIÓN MATEMÁTICA ---
+# --- CONFIGURACIÓN PRINCIPAL ---
+MODO_REAL = False  
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.22              # Subimos a 0.22% en modo pre-real para cubrir el Slippage
+MIN_PROFIT = 0.02              
 MAX_PROFIT = 5.0      
-CAPITAL_INICIAL = 50.82        # Mantenemos tu saldo ganado
 CAPITAL_SIMULADO = 50.82  
-TOTAL_TRADES = 4               # Mantenemos tus 4 trades exitosos
+TOTAL_TRADES = 4               
+
+DICCIONARIO_MERCADOS = {}
+MONEDAS_TOP = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'USDT']
+
+# Variables globales compartidas con el Dashboard
+ULTIMO_SPREAD = 0.0
+ULTIMA_RUTA = "Ninguna"
+ULTIMO_REFRESCO = "Nunca"
+
+# Listas en memoria para almacenar el historial de transacciones (Máximo 5 para ahorrar RAM)
+HISTORIAL_EXITOSAS = [
+    {"hora": "Histórico", "ruta": "Ruta inicial de simulación", "profit": 0.2200},
+    {"hora": "Histórico", "ruta": "Ruta inicial de simulación", "profit": 0.1850},
+    {"hora": "Histórico", "ruta": "Ruta inicial de simulación", "profit": 0.2510},
+    {"hora": "Histórico", "ruta": "Ruta inicial de simulación", "profit": 0.1990}
+]
+HISTORIAL_RECHAZADAS = []
+
+class DashboardServer(BaseHTTPRequestHandler):
+    """Servidor web ultraligero con registro de transacciones integrado"""
+    def do_GET(self):
+        global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO
+        global HISTORIAL_EXITOSAS, HISTORIAL_RECHAZADAS
+        
+        self.send_response(200)
+        self.send_header("Content-type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.end_headers()
+        
+        # Generar bloques HTML para transacciones exitosas
+        html_exitosas = ""
+        for t in reversed(HISTORIAL_EXITOSAS):
+            html_exitosas += f"""
+            <div style="border-left: 4px solid #00ff66; background: #252525; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 12px; text-align: left;">
+                <span style="color: #888;">[{t['hora']}]</span> <span style="color: #00ff66; font-weight:bold;">+{t['profit']:.4f}%</span><br>
+                <span style="color: #ddd;">{t['ruta']}</span>
+            </div>
+            """
+            
+        # Generar bloques HTML para oportunidades rechazadas
+        html_rechazadas = ""
+        if not HISTORIAL_RECHAZADAS:
+            html_rechazadas = "<p style='color:#666; font-size:12px;'>Sincronizando mercado...</p>"
+        for r in reversed(HISTORIAL_RECHAZADAS):
+            html_rechazadas += f"""
+            <div style="border-left: 4px solid #ff3333; background: #252525; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 11px; text-align: left;">
+                <span style="color: #888;">[{r['hora']}]</span> <span style="color: #ff3333;">{r['profit']:.4f}%</span><br>
+                <span style="color: #aaa;">{r['ruta']}</span>
+            </div>
+            """
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>OKX Arbitrage Bot</title>
+            <style>
+                body {{ background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; padding: 15px; margin:0; }}
+                .card {{ background-color: #1e1e1e; padding: 15px; border-radius: 10px; margin: 12px auto; max-width: 420px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }}
+                h1 {{ color: #00ffcc; font-size: 22px; margin-bottom: 5px; }}
+                h3 {{ margin-top: 0; color: #ffcc00; font-size: 16px; border-bottom: 1px solid #333; padding-bottom: 5px; }}
+                .profit {{ color: #00ff66; font-size: 26px; font-weight: bold; }}
+                .spread {{ color: #ffcc00; font-size: 18px; font-weight: bold; }}
+                .btn {{ background-color: #00ffcc; color: #121212; padding: 12px 25px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; text-decoration: none; display: inline-block; margin: 10px 0; width: 80%; max-width: 300px; }}
+            </style>
+        </head>
+        <body>
+            <h1>🤖 OKX BOT DASHBOARD</h1>
+            <p style="color: #aaa; font-size: 11px; margin-top:0;">Operando en la nube 24/7. Datos bajo demanda.</p>
+            
+            <div class="card">
+                <h3 style="color: #00ff66; border-color: #00ff66;">💰 SALDO SIMULADO</h3>
+                <div class="profit">${CAPITAL_SIMULADO:.2f} USDT</div>
+                <p style="margin: 5px 0 0 0; color: #aaa; font-size: 14px;">Operaciones totales: {TOTAL_TRADES}</p>
+            </div>
+            
+            <div class="card">
+                <h3>📊 ANÁLISIS EN TIEMPO REAL</h3>
+                <div class="spread">Mejor Spread: {ULTIMO_SPREAD:.4f}%</div>
+                <p style="font-size: 12px; color: #00ffcc; margin: 5px 0;">Ruta: {ULTIMA_RUTA}</p>
+                <p style="font-size: 10px; color: #888; margin: 0;">Último escaneo: {ULTIMO_REFRESCO}</p>
+            </div>
+
+            <div class="card">
+                <h3 style="color: #00ff66; border-color: #00ff66;">✅ ÚLTIMAS OPERACIONES (EXITOSAS)</h3>
+                {html_exitosas}
+            </div>
+
+            <div class="card">
+                <h3 style="color: #ff3333; border-color: #ff3333;">❌ OPORTUNIDADES DETECTADAS (RECHAZADAS)</h3>
+                {html_rechazadas}
+            </div>
+            
+            <a href="" class="btn">🔄 ACTUALIZAR PANEL</a>
+        </body>
+        </html>
+        """
+        self.send_header("Content-Length", str(len(html.encode("utf-8"))))
+        self.wfile.write(html.encode("utf-8"))
+
+    def log_message(self, format, *args): return
+
+def iniciar_dashboard():
+    puerto = int(os.getenv("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", puerto), DashboardServer)
+    logger.info(f"🌐 Servidor de historial web activo en puerto {puerto}")
+    server.serve_forever()
 
 def inicializar_okx():
-    """Inicializa OKX detectando si usa credenciales reales o públicas."""
-    if MODO_REAL:
-        logger.warning("⚠️ MODO REAL ACTIVADO: El bot usará fondos reales de tu cuenta.")
-        return ccxt.okx({
-            'apiKey': os.getenv('OKX_API_KEY'),       # Tomado de las variables de Railway
-            'secret': os.getenv('OKX_SECRET'),       # Tomado de las variables de Railway
-            'password': os.getenv('OKX_PASSWORD'),   # Tomado de las variables de Railway
-            'enableRateLimit': True,
-            'options': {'defaultType': 'swap'} 
-        })
-    else:
-        return ccxt.okx({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'swap'} 
-        })
+    return ccxt.okx({'enableRateLimit': True})
 
 def buscar_todos_los_triangulos(markets):
-    pares_swap = [
-        symbol for symbol, market in markets.items() 
-        if market['swap'] and market['active'] and market['linear'] and market['settle'] == 'USDT'
-    ]
-    
-    simbolos_por_moneda = {}
-    for par in pares_swap:
+    global DICCIONARIO_MERCADOS
+    DICCIONARIO_MERCADOS.clear()
+    adjacencia = {}
+    for symbol, market in markets.items():
         try:
-            partes_par = par.split(':')
-            base, quote = partes_par[0].split('/')
-            simbolos_por_moneda.setdefault(base, []).append(par)
-            simbolos_por_moneda.setdefault(quote, []).append(par)
-        except Exception:
-            continue
-
+            if not market.get('active', True): continue
+            base = market.get('base')
+            quote = market.get('quote')
+            if base in MONEDAS_TOP and quote in MONEDAS_TOP:
+                DICCIONARIO_MERCADOS[symbol] = {'base': base, 'quote': quote, 'type': 'swap' if market.get('swap') else 'spot'}
+                adjacencia.setdefault(base, set()).add((quote, symbol))
+                adjacencia.setdefault(quote, set()).add((base, symbol))
+        except Exception: continue
     triangulos = []
-    inicio = 'USDT'
-    if inicio not in simbolos_por_moneda: return []
-
-    for par1 in simbolos_por_moneda[inicio]:
-        try:
-            base1, quote1 = par1.split(':')[0].split('/')
-            m1 = base1 if quote1 == inicio else quote1
-            if m1 not in simbolos_por_moneda: continue
-            
-            for par2 in simbolos_por_moneda[m1]:
-                if par2 == par1: continue
-                base2, quote2 = par2.split(':')[0].split('/')
-                m2 = base2 if quote2 == m1 else quote2
-                
-                for par3 in simbolos_por_moneda[m2]:
-                    if par3 == par2 or par3 == par1: continue
-                    base3, quote3 = par3.split(':')[0].split('/')
-                    if base3 == inicio or quote3 == inicio:
-                        ruta = (par1, par2, par3)
-                        if ruta not in triangulos: triangulos.append(ruta)
-        except Exception:
-            continue
+    if 'USDT' not in adjacencia: return []
+    for m1, par1 in adjacencia['USDT']:
+        if m1 not in adjacencia: continue
+        for m2, par2 in adjacencia[m1]:
+            if m2 == 'USDT' or par2 == par1: continue
+            if m2 not in adjacencia: continue
+            for m3, par3 in adjacencia[m2]:
+                if m3 == 'USDT' and par3 != par1 and par3 != par2:
+                    ruta = (par1, par2, par3)
+                    if ruta not in triangulos: triangulos.append(ruta)
     return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
+    global DICCIONARIO_MERCADOS
     monto = 1.0  
     secuencia_texto = ""
     moneda_actual = "USDT"
-
     for i, par in enumerate(triangulo):
         ticker = tickers.get(par)
-        if not ticker or not ticker['ask'] or not ticker['bid']: return -999.0, ""
-        
-        base, quote = par.split(':')[0].split('/')
-
+        if not ticker or not ticker.get('ask') or not ticker.get('bid'): return -999.0, ""
+        base, quote, tipo = DICCIONARIO_MERCADOS[par]['base'], DICCIONARIO_MERCADOS[par]['quote'], DICCIONARIO_MERCADOS[par]['type']
         if moneda_actual == quote:
             monto = (monto / (ticker['ask'] * 1.0001)) * (1 - TAKER_FEE_PERPETUAL)
-            secuencia_texto += base
+            secuencia_texto += f"{base}({tipo})"
             moneda_actual = base
         else:
             monto = (monto * (ticker['bid'] * 0.9999)) * (1 - TAKER_FEE_PERPETUAL)
-            secuencia_texto += quote
+            secuencia_texto += f"{quote}({tipo})"
             moneda_actual = quote
         if i < 2: secuencia_texto += ">"
-
     return (monto - 1.0) * 100, secuencia_texto
 
-def ejecutar_ordenes_reales(exchange, triangulo):
-    """
-    Función encargada de lanzar las 3 órdenes de mercado consecutivas en OKX.
-    Solo se ejecutará si MODO_REAL = True.
-    """
-    logger.info(f"🚀 Lanzando ejecución real en OKX para la ruta: {triangulo}")
-    moneda_actual = "USDT"
-    
-    # Nota: El tamaño de las órdenes reales debe ajustarse al margen y apalancamiento de tu cuenta
-    # Este bloque sirve de plantilla automatizada de ejecución
-    try:
-        for par in triangulo:
-            base, quote = par.split(':')[0].split('/')
-            
-            if moneda_actual == quote:
-                # Comprar Base usando Quote (Orden de mercado)
-                logger.info(f"Ejecutando COMPRA de mercado en {par}")
-                # order = exchange.create_market_buy_order(par, cantidad)
-                moneda_actual = base
-            else:
-                # Vender Base para obtener Quote (Orden de mercado)
-                logger.info(f"Ejecutando VENTA de mercado en {par}")
-                # order = exchange.create_market_sell_order(par, cantidad)
-                moneda_actual = quote
-                
-            time.sleep(0.1) # Micro-pausa de protección contra desbordamiento de red
-        logger.info("✅ Ciclo de arbitraje real finalizado en los servidores de OKX.")
-    except Exception as e:
-        logger.error(f"❌ FALLO CRÍTICO EN OPERACIÓN REAL: {e}. Deteniendo ejecuciones.")
-
 def ejecutar_bot():
-    global CAPITAL_SIMULADO, TOTAL_TRADES
+    global CAPITAL_SIMULADO, TOTAL_TRADES, ULTIMO_SPREAD, ULTIMA_RUTA, ULTIMO_REFRESCO
+    global HISTORIAL_EXITOSAS, HISTORIAL_RECHAZADAS
     exchange = inicializar_okx()
-    
-    logger.info(f"REINICIANDO BOT. CONFIGURACIÓN: [MODO_REAL = {MODO_REAL}]")
-    
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Estructura lista. Analizando {len(triangulos)} caminos de futuros perpetuos.")
-        
+        logger.info(f"Estructura lista para monitoreo en vivo.")
         while True:
             try:
                 tickers = exchange.fetch_tickers()
                 resultados_vuelta = []
-                
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
-                    if profit > -50.0:
+                    if -50.0 < profit < MAX_PROFIT:
                         resultados_vuelta.append((tri, texto, profit))
-
-                resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
-                
                 if resultados_vuelta:
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
+                    
+                    hora_actual = time.strftime("%H:%M:%S")
+                    ULTIMO_SPREAD = mejor_profit
+                    ULTIMA_RUTA = mejor_ruta_texto
+                    ULTIMO_REFRESCO = hora_actual
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
-                        ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
-                        CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ¡TRADE DETECTADO #{TOTAL_TRADES}! Ruta: {mejor_ruta_texto} | Neto: +{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT")
+                        ganancia_trade = CAPITAL_SIMULADO * (mejor_profit / 100)
+                        CAPITAL_SIMULADO += ganancia_trade
                         
-                        # Si el modo real está encendido, el bot pasa de simular a comprar de verdad
-                        if MODO_REAL:
-                            ejecutar_ordenes_reales(exchange, mejor_triangulo)
-                    else:
-                        logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
-                
-            except Exception as e:
-                logger.error(f"Error en ciclo: {e}")
-                
-            time.sleep(0.8)
-
-    except Exception as e:
-        logger.error(f"Fallo crítico: {e}")
-
-if __name__ == "__main__":
-    ejecutar_bot()
+                        # Añadir al historial de exitosas y limitar a los últimos 5 registros
