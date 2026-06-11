@@ -13,20 +13,20 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 # =====================================================================
-# 🚨 INTERRUPTOR DE SEGURIDAD PRINCIPAL
+# 🚨 ГЛАВЕН ПРЕКЪСВАЧ ЗА СИГУРНОСТ
 # =====================================================================
-MODO_REAL = False  # Cambiar a True SOLO cuando quieras usar dinero real
+MODO_REAL = False  # Променете на True САМО когато искате да търгувате с реални пари
 
-# --- CONFIGURACIÓN MATEMÁTICA ---
+# --- МАТЕМАТИЧЕСКА НАСТРОЙКА ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.22              # Filtro mínimo para cubrir comisiones y slippage
+MIN_PROFIT = 0.22              # Минимален филтър за печалба след комисиони и слипидж
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
 TOTAL_TRADES = 4               
 
 def inicializar_okx():
-    """Inicializa OKX y configura la cuenta en modo multi-divisa si está en MODO_REAL."""
+    """Инициализира OKX и конфигурира акаунта в мултивалутен режим при MODO_REAL."""
     config = {
         'enableRateLimit': True,
         'options': {'defaultType': 'swap'} 
@@ -40,10 +40,9 @@ def inicializar_okx():
         
         exchange = ccxt.okx(config)
         
-        # Ajuste dinámico del modo de cuenta para permitir uso de múltiples monedas como colateral
         try:
             logger.info("🔧 Configurando cuenta de OKX en modo Multi-Moneda...")
-            # '2' representa el modo Multi-currency / Multi-divisa en la API V5 de OKX
+            # Активиране на Multi-currency марж режим в OKX API V5
             exchange.private_post_account_set_account_position_mode({'acctLv': '2'})
             logger.info("✅ Modo Multi-Moneda verificado y activado exitosamente.")
         except Exception as e:
@@ -54,17 +53,22 @@ def inicializar_okx():
         return ccxt.okx(config)
 
 def extraer_base_quote(par):
-    """Separa correctamente un par de futuros de OKX (ej: 'BTC/USDT:USDT' -> BTC, USDT)."""
-    par_limpio = par.split(':')
-    base, quote = par_limpio[0].split('/')
+    """Раздробява правилно суап символите на OKX (напр. 'BTC/USDT:USDT' -> BTC, USDT)."""
+    partes_par = par.split(':')
+    base, quote = partes_par[0].split('/')
     return base, quote
 
 def buscar_todos_los_triangulos(markets):
-    pares_swap = [
-        symbol for symbol, market in markets.items() 
-        if market.get('swap') and market.get('active') and market.get('linear') and market.get('settle') == 'USDT'
-    ]
-    
+    """Открива триъгълни комбинации, заобикаляйки бъговете със зареждането на пазарите в CCXT."""
+    pares_swap = []
+    for symbol, market in markets.items():
+        # Подсигурен филтър за OKX фючърси (swap) в USDT
+        es_swap = market.get('swap', False) or (':' in symbol and symbol.endswith('USDT'))
+        es_activo = market.get('active', True)
+        
+        if es_swap and es_activo:
+            pares_swap.append(symbol)
+            
     simbolos_por_moneda = {}
     for par in pares_swap:
         try:
@@ -76,7 +80,9 @@ def buscar_todos_los_triangulos(markets):
 
     triangulos = []
     inicio = 'USDT'
-    if inicio not in simbolos_por_moneda: return []
+    if inicio not in simbolos_por_moneda: 
+        logger.error("❌ Не е намерен нито един USDT пазар в списъка.")
+        return []
 
     for par1 in simbolos_por_moneda[inicio]:
         try:
@@ -94,12 +100,14 @@ def buscar_todos_los_triangulos(markets):
                     base3, quote3 = extraer_base_quote(par3)
                     if base3 == inicio or quote3 == inicio:
                         ruta = (par1, par2, par3)
-                        if ruta not in triangulos: triangulos.append(ruta)
+                        if ruta not in triangulos: 
+                            triangulos.append(ruta)
         except Exception:
             continue
     return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
+    """Изчислява потенциалната доходност по математическия модел."""
     monto = 1.0  
     secuencia_texto = ""
     moneda_actual = "USDT"
@@ -123,13 +131,10 @@ def calcular_arbitraje(exchange, triangulo, tickers):
     return (monto - 1.0) * 100, secuencia_texto
 
 def ejecutar_ordenes_reales(exchange, triangulo):
-    """
-    Lanza las 3 órdenes reales consecutivas en OKX usando el formato de CONTRATOS.
-    """
-    logger.info(f"🚀 [OPERACIÓN REAL] Iniciando ejecución en OKX para la ruta: {triangulo}")
+    """Изпълнява 3 реални пазарни поръчки в OKX, изчислявайки точния брой договори."""
+    logger.info(f"🚀 [OPERACIÓN REAL] Iniciando ejecución в OKX за маршрут: {triangulo}")
     moneda_actual = "USDT"
     
-    # Obtenemos el saldo real disponible en tu cuenta para iniciar el flujo de inversión
     try:
         balance = exchange.fetch_balance()
         capital_flujo = float(balance['total'].get('USDT', CAPITAL_SIMULADO))
@@ -140,11 +145,10 @@ def ejecutar_ordenes_reales(exchange, triangulo):
         for par in triangulo:
             base, quote = extraer_base_quote(par)
             market = exchange.market(par)
-            contract_size = market['contractSize']  # Tamaño del contrato unitario
+            contract_size = market['contractSize']  # Размер на договора, наложен от OKX
             
-            # Forzamos apalancamiento 1x para proteger la cuenta multidivisa de liquidaciones cruzadas
             try:
-                exchange.set_leverage(1, par)
+                exchange.set_leverage(1, par)  # Подсигуряване на 1х ливъридж
             except Exception:
                 pass
 
@@ -156,13 +160,12 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                 contratos = int(cantidad_base / contract_size)
                 
                 if contratos < 1:
-                    logger.error(f"❌ Tamaño insuficiente. Menos de 1 contrato mínimo requerido para {par}")
+                    logger.error(f"❌ Размерът е твърде малък. По-малко от 1 договор за {par}")
                     break
 
-                logger.info(f"🛒 ENVIANDO COMPRA MERCADO: {par} | Contratos: {contratos}")
-                # EJECUCIÓN NATIVA REAL:
+                logger.info(f"🛒 COMPRA MERCADO: {par} | Contratos: {contratos}")
                 order = exchange.create_market_buy_order(par, contratos)
-                logger.info(f"ID de Orden Ejecutada: {order.get('id', 'N/A')}")
+                logger.info(f"ID Orden: {order.get('id', 'N/A')}")
                 
                 capital_flujo = (contratos * contract_size)
                 moneda_actual = base
@@ -171,24 +174,24 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                 contratos = int(capital_flujo / contract_size)
                 
                 if contratos < 1:
-                    logger.error(f"❌ Tamaño insuficiente. Menos de 1 contrato mínimo requerido para {par}")
+                    logger.error(f"❌ Размерът е твърде малък. По-малко от 1 договор за {par}")
                     break
 
-                logger.info(f"🔨 ENVIANDO VENTA MERCADO: {par} | Contratos: {contratos}")
-                # EJECUCIÓN NATIVA REAL:
+                logger.info(f"🔨 VENTA MERCADO: {par} | Contratos: {contratos}")
                 order = exchange.create_market_sell_order(par, contratos)
-                logger.info(f"ID de Orden Ejecutada: {order.get('id', 'N/A')}")
+                logger.info(f"ID Orden: {order.get('id', 'N/A')}")
                 
                 capital_flujo = (contratos * contract_size) * precio
                 moneda_actual = quote
                 
-            time.sleep(0.05)  # Retraso mínimo optimizado para evitar retrasos de precio
-        logger.info("✅ Secuencia de arbitraje real completada.")
+            time.sleep(0.05)  
+        logger.info("✅ Реалният триъгълен цикъл беше затворен успешно.")
         
     except Exception as e:
-        logger.error(f"❌ FALLO CRÍTICO DURANTE EJECUCIÓN EN VIVO: {e}")
+        logger.error(f"❌ КРИТИЧНА ГРЕШКА ПРИ ТЪРГОВИЯ НА ЖИВО: {e}")
 
 def ejecutar_bot():
+    """Главен изпълнителен цикъл на бота."""
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
     
