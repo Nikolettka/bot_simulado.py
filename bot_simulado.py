@@ -53,22 +53,36 @@ def inicializar_okx():
         return ccxt.okx(config)
 
 def extraer_base_quote(par):
-    """Раздробява правилно суап символите на OKX (напр. 'BTC/USDT:USDT' -> BTC, USDT)."""
-    partes_par = par.split(':')
-    base, quote = partes_par[0].split('/')
+    """
+    Универсално извличане на Base и Quote за OKX.
+    Поддържа формати: 'BTC/USDT:USDT', 'BTC-USDT-SWAP', 'BTC/USDT'
+    """
+    par_limpio = par.split(':')[0]
+    
+    if '-' in par_limpio:
+        partes = par_limpio.split('-')
+        base = partes[0]
+        quote = partes[1]
+    elif '/' in par_limpio:
+        partes = par_limpio.split('/')
+        base = partes[0]
+        quote = partes[1]
+    else:
+        raise ValueError(f"Formato de par desconocido: {par}")
+        
     return base, quote
 
 def buscar_todos_los_triangulos(markets):
-    """Открива триъгълни комбинации, заобикаляйки бъговете със зареждането на пазарите в CCXT."""
+    """Търси триъгълници, като приема абсолютно всички активни USDT фючърс пазари на OKX."""
     pares_swap = []
-    for symbol, market in markets.items():
-        # Подсигурен филтър за OKX фючърси (swap) в USDT
-        es_swap = market.get('swap', False) or (':' in symbol and symbol.endswith('USDT'))
-        es_activo = market.get('active', True)
-        
-        if es_swap and es_activo:
+    
+    for symbol in markets.keys():
+        es_swap_okx = ('SWAP' in symbol) or (':' in symbol and symbol.endswith('USDT'))
+        if es_swap_okx and ('USDT' in symbol):
             pares_swap.append(symbol)
             
+    logger.info(f"Намерени суап пазари в OKX: {len(pares_swap)}")
+    
     simbolos_por_moneda = {}
     for par in pares_swap:
         try:
@@ -81,7 +95,7 @@ def buscar_todos_los_triangulos(markets):
     triangulos = []
     inicio = 'USDT'
     if inicio not in simbolos_por_moneda: 
-        logger.error("❌ Не е намерен нито един USDT пазар в списъка.")
+        logger.error("❌ Критично: USDT липсва в обработените валути!")
         return []
 
     for par1 in simbolos_por_moneda[inicio]:
@@ -104,6 +118,7 @@ def buscar_todos_los_triangulos(markets):
                             triangulos.append(ruta)
         except Exception:
             continue
+            
     return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
@@ -145,10 +160,10 @@ def ejecutar_ordenes_reales(exchange, triangulo):
         for par in triangulo:
             base, quote = extraer_base_quote(par)
             market = exchange.market(par)
-            contract_size = market['contractSize']  # Размер на договора, наложен от OKX
+            contract_size = market['contractSize']  
             
             try:
-                exchange.set_leverage(1, par)  # Подсигуряване на 1х ливъридж
+                exchange.set_leverage(1, par)  
             except Exception:
                 pass
 
