@@ -25,6 +25,9 @@ CAPITAL_INICIAL = 50.82
 CAPITAL_SIMULADO = 50.82  
 TOTAL_TRADES = 4               
 
+# Глобален речник за бърз достъп до структурата на пазарите
+DICCIONARIO_MERCADOS = {}
+
 def inicializar_okx():
     """Инициализира OKX и конфигурира акаунта в мултивалутен режим при MODO_REAL."""
     config = {
@@ -51,77 +54,66 @@ def inicializar_okx():
     else:
         return ccxt.okx(config)
 
-def extraer_base_quote(par):
-    """
-    Универсално извличане на Base и Quote за OKX от текстов низ.
-    """
-    # 1. Вземаме само лявата част преди двоеточието като чист текст ('BTC/USDT:USDT' -> 'BTC/USDT')
-    texto_par = par.split(':')[0]
-    
-    # 2. Обработваме стандартния формат на CCXT с наклонена черта
-    if '/' in texto_par:
-        partes = texto_par.split('/')
-        return partes[0], partes[1]
-        
-    # 3. Алтернативна обработка за формати с тирета ('BTC-USDT-SWAP')
-    elif '-' in texto_par:
-        partes = texto_par.split('-')
-        return partes[0], partes[1]
-        
-    else:
-        raise ValueError(f"Непознат формат на двойката: {par}")
-
 def buscar_todos_los_triangulos(markets):
-    """Търси триъгълници, като приема абсолютно всички активни USDT фючърс пазари на OKX."""
+    """Търси триъгълници, използвайки вградените base и quote данни от CCXT."""
+    global DICCIONARIO_MERCADOS
     pares_swap = []
     
-    for symbol in markets.keys():
-        es_swap_okx = ('SWAP' in symbol) or (':' in symbol and symbol.endswith('USDT'))
-        if es_swap_okx and ('USDT' in symbol):
+    for symbol, market in markets.items():
+        # Взимаме само активни фючърси (swap), които се разплащат в USDT
+        is_swap = market.get('swap', False)
+        is_active = market.get('active', True)
+        settle_usdt = market.get('settle') == 'USDT'
+        
+        if is_swap and is_active and settle_usdt:
             pares_swap.append(symbol)
+            # Запазваме base и quote в глобалния речник
+            DICCIONARIO_MERCADOS[symbol] = {
+                'base': market['base'],
+                'quote': market['quote']
+            }
             
     logger.info(f"Намерени суап пазари в OKX: {len(pares_swap)}")
     
     simbolos_por_moneda = {}
     for par in pares_swap:
-        try:
-            base, quote = extraer_base_quote(par)
-            simbolos_por_moneda.setdefault(base, []).append(par)
-            simbolos_por_moneda.setdefault(quote, []).append(par)
-        except Exception as e:
-            continue
+        base = DICCIONARIO_MERCADOS[par]['base']
+        quote = DICCIONARIO_MERCADOS[par]['quote']
+        simbolos_por_moneda.setdefault(base, []).append(par)
+        simbolos_por_moneda.setdefault(quote, []).append(par)
 
     triangulos = []
     inicio = 'USDT'
     if inicio not in simbolos_por_moneda: 
-        logger.error("❌ Критично: USDT липсва в обработените валути!")
+        logger.error("❌ Критично: USDT липсва в заредените валути!")
         return []
 
     for par1 in simbolos_por_moneda[inicio]:
-        try:
-            base1, quote1 = extraer_base_quote(par1)
-            m1 = base1 if quote1 == inicio else quote1
-            if m1 not in simbolos_por_moneda: continue
+        base1 = DICCIONARIO_MERCADOS[par1]['base']
+        quote1 = DICCIONARIO_MERCADOS[par1]['quote']
+        m1 = base1 if quote1 == inicio else quote1
+        if m1 not in simbolos_por_moneda: continue
+        
+        for par2 in simbolos_por_moneda[m1]:
+            if par2 == par1: continue
+            base2 = DICCIONARIO_MERCADOS[par2]['base']
+            quote2 = DICCIONARIO_MERCADOS[par2]['quote']
+            m2 = base2 if quote2 == m1 else quote2
             
-            for par2 in simbolos_por_moneda[m1]:
-                if par2 == par1: continue
-                base2, quote2 = extraer_base_quote(par2)
-                m2 = base2 if quote2 == m1 else quote2
-                
-                for par3 in simbolos_por_moneda[m2]:
-                    if par3 == par2 or par3 == par1: continue
-                    base3, quote3 = extraer_base_quote(par3)
-                    if base3 == inicio or quote3 == inicio:
-                        ruta = (par1, par2, par3)
-                        if ruta not in triangulos: 
-                            triangulos.append(ruta)
-        except Exception:
-            continue
-            
+            for par3 in simbolos_por_moneda[m2]:
+                if par3 == par2 or par3 == par1: continue
+                base3 = DICCIONARIO_MERCADOS[par3]['base']
+                quote3 = DICCIONARIO_MERCADOS[par3]['quote']
+                if base3 == inicio or quote3 == inicio:
+                    ruta = (par1, par2, par3)
+                    if ruta not in triangulos: 
+                        triangulos.append(ruta)
+                        
     return triangulos
 
 def calcular_arbitraje(exchange, triangulo, tickers):
-    """Изчислява потенциалната доходност по математическия модел."""
+    """Изчислява потенциалната доходност без текстова обработка."""
+    global DICCIONARIO_MERCADOS
     monto = 1.0  
     secuencia_texto = ""
     moneda_actual = "USDT"
@@ -130,7 +122,8 @@ def calcular_arbitraje(exchange, triangulo, tickers):
         ticker = tickers.get(par)
         if not ticker or not ticker.get('ask') or not ticker.get('bid'): return -999.0, ""
         
-        base, quote = extraer_base_quote(par)
+        base = DICCIONARIO_MERCADOS[par]['base']
+        quote = DICCIONARIO_MERCADOS[par]['quote']
 
         if moneda_actual == quote:
             monto = (monto / (ticker['ask'] * 1.0001)) * (1 - TAKER_FEE_PERPETUAL)
@@ -146,6 +139,7 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
 def ejecutar_ordenes_reales(exchange, triangulo):
     """Изпълнява 3 реални пазарни поръчки в OKX, изчислявайки договорите."""
+    global DICCIONARIO_MERCADOS
     logger.info(f"🚀 [OPERACIÓN REAL] Iniciando ejecución в OKX за маршрут: {triangulo}")
     moneda_actual = "USDT"
     
@@ -157,7 +151,8 @@ def ejecutar_ordenes_reales(exchange, triangulo):
 
     try:
         for par in triangulo:
-            base, quote = extraer_base_quote(par)
+            base = DICCIONARIO_MERCADOS[par]['base']
+            quote = DICCIONARIO_MERCADOS[par]['quote']
             market = exchange.market(par)
             contract_size = market['contractSize']  
             
