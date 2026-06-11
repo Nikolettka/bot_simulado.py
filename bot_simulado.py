@@ -18,16 +18,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-# =====================================================================
-# 🚨 НАПЪЛНО АВТОНОМЕН СИМУЛАЦИОНЕН РЕЖИМ (БЕЗ КЛЮЧОВЕ)
-# =====================================================================
 MODO_REAL = False  
-
-# --- МАТЕМАТИЧЕСКА НАСТРОЙКА ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.02              # Лимит от 0.02% за постоянни симулирани сделки
+MIN_PROFIT = 0.02              
 MAX_PROFIT = 5.0      
-CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
 TOTAL_TRADES = 4               
 
@@ -47,11 +41,9 @@ def buscar_todos_los_triangulos(markets):
             is_spot = market.get('spot', False)
             is_swap = market.get('swap', False)
             
-            # Четем директно чистата структура на CCXT
             if is_spot or is_swap:
                 base = market['base']
                 quote = market['quote']
-                
                 DICCIONARIO_MERCADOS[symbol] = {
                     'base': base,
                     'quote': quote,
@@ -62,8 +54,6 @@ def buscar_todos_los_triangulos(markets):
         except Exception:
             continue
             
-    logger.info(f"Успешно заредени пазари: {len(DICCIONARIO_MERCADOS)}")
-    
     triangulos = []
     inicio = 'USDT'
     if inicio not in adjacencia: return []
@@ -75,10 +65,10 @@ def buscar_todos_los_triangulos(markets):
             if m2 not in adjacencia: continue
             for m3, par3 in adjacencia[m2]:
                 if m3 == inicio and par3 != par1 and par3 != par2:
-                    ruta = (par1, par2, par3)
-                    triangulos.append(ruta)
+                    triangulos.append((par1, par2, par3))
                         
-    return triangulos
+    # Ограничаваме до първите 150 триъгълника за пестене на RAM в Railway
+    return triangulos[:150]
 
 def calcular_arbitraje(exchange, triangulo, tickers):
     global DICCIONARIO_MERCADOS
@@ -88,7 +78,6 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
     for i, par in enumerate(triangulo):
         ticker = tickers.get(par)
-        # Ако липсва цена за конкретния чист символ, прекратяваме калкулацията
         if not ticker or not ticker.get('ask') or not ticker.get('bid'): return -999.0, ""
         
         base = DICCIONARIO_MERCADOS[par]['base']
@@ -110,18 +99,31 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
-    logger.info("СТАРТИРАНЕ НА ХИБРИДЕН ПАЗАРЕН СКЕНЕР.")
+    logger.info("СТАРТИРАНЕ НА ОЛЕКОТЕН БОТ ЗА ТЕСТВАНЕ В RAILWAY.")
     
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Връзката е стабилна. Анализ на {len(triangulos)} триъгълни маршрута.")
+        logger.info(f"Оптимизирана RAM памет. Сканиране на {len(triangulos)} бързи пътища.")
+        
+        # Събираме списък от пазари, които реално ни трябват
+        pares_необходими = set()
+        for t in triangulos:
+            for par in t:
+                pares_необходими.add(par)
         
         while True:
             try:
-                tickers = exchange.fetch_tickers()
-                resultados_vuelta = []
+                # ОЛЕКОТЕНА ЗАЯВКА: Вместо fetch_tickers(), теглим само необходимите цени една по една
+                tickers = {}
+                for par in pares_необходими:
+                    try:
+                        tickers[par] = exchange.fetch_ticker(par)
+                    except Exception:
+                        continue
+                    time.sleep(0.02) # Малка микро-пауза за стабилност
                 
+                resultados_vuelta = []
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
                     if -50.0 < profit < MAX_PROFIT:
@@ -135,14 +137,14 @@ def ejecutar_bot():
                         TOTAL_TRADES += 1
                         ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                         CAPITAL_SIMULADO += ganancia
-                        logger.info(f"💰 ТРЕЙД! #{TOTAL_TRADES} | Маршрут: {mejor_ruta_texto} | Спред: +{mejor_profit:.4f}% | Баланс: ${CAPITAL_SIMULADO:.2f}")
+                        logger.info(f"💰 ТРЕЙД! #{TOTAL_TRADES} | {mejor_ruta_texto} | Спред: +{mejor_profit:.4f}% | Салдо: ${CAPITAL_SIMULADO:.2f}")
                     else:
                         logger.info(f"Сканиране... | Макс Спред: {mejor_profit:.4f}% | Цел: {MIN_PROFIT}%")
                 else:
-                    logger.info("Синхронизиране на ценовата матрица с OKX...")
+                    logger.info("Изчакване опресняването на цените от OKX...")
             except Exception:
                 pass
-            time.sleep(3.0) # Сигурна 3-секундна пауза за защита на безключовия достъп
+            time.sleep(3.0) 
     except Exception as e:
         logger.error(f"Критичен срив: {e}")
 
