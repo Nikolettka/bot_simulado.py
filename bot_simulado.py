@@ -2,13 +2,13 @@ import time
 import threading
 import logging
 import ccxt
+import sys
 from dash import Dash, html, dcc
 from dash.dependencies import Input, Output
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
 
-# Parámetros del simulador agresivo
 MIN_PROFIT = 0.3      
 MAX_PROFIT = 5.0      
 TAKER_FEE = 0.0010     
@@ -16,11 +16,14 @@ CAPITAL_SIMULADO = 50.0
 
 data_compartida = {
     "capital_actual": CAPITAL_SIMULADO,
-    "mejor_ruta": "Inicializando API...",
-    "mejor_profit": 0.0,
     "total_triangulos": 0,
     "tiempo_escaneo": 0.0,
-    "transacciones_html": [html.Div("Esperando oportunidades (>= 0.3%)...", style={'color': '#848e9c', 'textAlign': 'center', 'padding': '15px'})]
+    "tamano_peticion_kb": 0.0,
+    "total_datos_mb": 0.0,
+    "record_max_profit": -999.0,
+    "record_min_profit": 999.0,
+    "top_rutas": [("N/A", 0.0), ("N/A", 0.0), ("N/A", 0.0)],
+    "transacciones_html": [html.Div("Esperando oportunidades (>= 0.3%)...", style={'color': '#848e9c', 'textAlign': 'center', 'padding': '10px'})]
 }
 
 def inicializar_okx_publico():
@@ -82,6 +85,7 @@ def bucle_bot_segundo():
     global CAPITAL_SIMULADO
     exchange = inicializar_okx_publico()
     registro_trades = []
+    acumulado_bytes = 0
     
     try:
         markets = exchange.load_markets()
@@ -92,15 +96,36 @@ def bucle_bot_segundo():
             try:
                 t_inicio = time.time()
                 tickers = exchange.fetch_tickers()
-                mejor_profit = -999.0
-                mejor_ruta_texto = ""
+                
+                # Calcular el peso de los datos recibidos de la API de OKX
+                peso_bytes = sys.getsizeof(str(tickers))
+                acumulado_bytes += peso_bytes
+                data_compartida["tamano_peticion_kb"] = peso_bytes / 1024
+                data_compartida["total_datos_mb"] = acumulado_bytes / (1024 * 1024)
 
+                resultados_vuelta = []
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
-                    if profit > mejor_profit:
-                        mejor_profit = profit
-                        mejor_ruta_texto = texto
+                    if profit > -50.0:  # Evita errores de tickers vacíos
+                        resultados_vuelta.append((texto, profit))
 
+                # Ordenar todos los caminos evaluados de mayor a menor beneficio
+                resultados_vuelta.sort(key=lambda x: x[1], reverse=True)
+                
+                # Extraer el Top 3
+                top_3 = resultados_vuelta[:3]
+                while len(top_3) < 3: top_3.append(("N/A", 0.0))
+                data_compartida["top_rutas"] = top_3
+
+                mejor_ruta_texto, mejor_profit = top_3[0]
+
+                # Récords históricos de la sesión
+                if mejor_profit > data_compartida["record_max_profit"]:
+                    data_compartida["record_max_profit"] = mejor_profit
+                if mejor_profit < data_compartida["record_min_profit"] and mejor_profit > -10.0:
+                    data_compartida["record_min_profit"] = mejor_profit
+
+                # Ejecutar trade simulado si supera el spread requerido
                 if mejor_profit >= MIN_PROFIT:
                     ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                     CAPITAL_SIMULADO += ganancia
@@ -112,13 +137,10 @@ def bucle_bot_segundo():
                         html.Span(f"${CAPITAL_SIMULADO:.2f}", style={'color': '#ffffff', 'fontWeight': 'bold'})
                     ])
                     registro_trades.insert(0, nueva_fila)
-                    if len(registro_trades) > 5:
-                        registro_trades.pop()
+                    if len(registro_trades) > 5: registro_trades.pop()
                     data_compartida["transacciones_html"] = list(registro_trades)
 
                 data_compartida["capital_actual"] = CAPITAL_SIMULADO
-                data_compartida["mejor_ruta"] = mejor_ruta_texto
-                data_compartida["mejor_profit"] = mejor_profit
                 data_compartida["tiempo_escaneo"] = time.time() - t_inicio
 
             except Exception as e:
@@ -128,83 +150,48 @@ def bucle_bot_segundo():
     except Exception as e:
         logger.error(f"Fallo critico: {e}")
 
-# --- ENTORNO WEB OSCURO REESTRUCTURADO ---
+# --- ENTORNO WEB EXPANDIDO MASIVO ---
 app = Dash(__name__)
 
 app.layout = html.Div(style={'backgroundColor': '#12161a', 'color': '#ffffff', 'fontFamily': 'sans-serif', 'padding': '15px', 'minHeight': '100vh'}, children=[
-    html.H2("⚡ OKX ARBITRAGE PRO", style={'textAlign': 'center', 'color': '#eaecef', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '10px', 'margin': '0'}),
+    html.H2("⚡ OKX ARBITRAGE ULTRA PRO", style={'textAlign': 'center', 'color': '#eaecef', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '10px', 'margin': '0'}),
     
-    # Tarjeta Principal de Balance
+    # Bloque 1: Capital Formateado
     html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '20px', 'marginTop': '15px', 'textAlign': 'center'}, children=[
         html.Div("Capital Simulado Disponible", style={'color': '#848e9c', 'fontSize': '14px'}),
         html.Div(id="live-capital", style={'color': '#02c076', 'fontSize': '36px', 'fontWeight': 'bold', 'marginTop': '5px'})
     ]),
     
-    # Grid de Detalles del Mercado
+    # Bloque 2: Filtros básicos
     html.Div(style={'display': 'flex', 'gap': '10px', 'marginTop': '15px'}, children=[
         html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px', 'flex': '1', 'textAlign': 'center'}, children=[
-            html.Div("Spread Maximo", style={'color': '#848e9c', 'fontSize': '13px'}),
+            html.Div("Spread Máximo", style={'color': '#848e9c', 'fontSize': '13px'}),
             html.Div(id="live-profit", style={'fontSize': '20px', 'fontWeight': 'bold', 'marginTop': '5px'})
         ]),
         html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px', 'flex': '1', 'textAlign': 'center'}, children=[
-            html.Div("Filtro Minimo", style={'color': '#848e9c', 'fontSize': '13px'}),
+            html.Div("Filtro Operación", style={'color': '#848e9c', 'fontSize': '13px'}),
             html.Div(f"+{MIN_PROFIT}%", style={'color': '#f0b90b', 'fontSize': '20px', 'fontWeight': 'bold', 'marginTop': '5px'})
         ])
     ]),
-    
-    # Caja de Ruta
+
+    # NUEVO BLOQUE: TOP 3 RUTAS EN TIEMPO REAL
     html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
-        html.Div("Mejor Ruta Detectada (1s):", style={'color': '#848e9c', 'fontSize': '13px', 'marginBottom': '5px'}),
-        html.Div(id="live-route", style={'color': '#f0b90b', 'fontSize': '18px', 'fontWeight': 'bold', 'textAlign': 'center', 'fontFamily': 'monospace'})
+        html.Div("🔥 Top 3 Caminos Más Rentables Libros OKX", style={'color': '#eaecef', 'fontSize': '14px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '6px', 'marginBottom': '10px'}),
+        html.Div(id="live-top-3-container")
     ]),
 
-    # Detalles Tecnicos
-    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px', 'display': 'flex', 'justifyContent': 'space-between'}, children=[
-        html.Div(children=[
-            html.Div("Caminos Analizados", style={'color': '#848e9c', 'fontSize': '12px'}),
-            html.Div(id="live-total-tri", style={'fontSize': '15px', 'fontWeight': 'bold', 'color': '#eaecef', 'marginTop': '3px'})
-        ]),
-        html.Div(style={'textAlign': 'right'}, children=[
-            html.Div("Latencia Escaneo", style={'color': '#848e9c', 'fontSize': '12px'}),
-            html.Div(id="live-speed", style={'fontSize': '15px', 'fontWeight': 'bold', 'color': '#eaecef', 'marginTop': '3px'})
+    # NUEVO BLOQUE: RENDIMIENTO DE LA SESIÓN (RÉCORDS)
+    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
+        html.Div("📊 Historial de Rangos de Profit (Sesión)", style={'color': '#eaecef', 'fontSize': '14px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '6px', 'marginBottom': '10px'}),
+        html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'fontSize': '13px'}, children=[
+            html.Div([html.Span("Mejor Spread Visto: ", style={'color': '#848e9c'}), html.Span(id="live-record-max", style={'fontWeight': 'bold', 'color': '#02c076'})]),
+            html.Div([html.Span("Peor Spread Visto: ", style={'color': '#848e9c'}), html.Span(id="live-record-min", style={'fontWeight': 'bold', 'color': '#f84960'})])
         ])
     ]),
-    
-    # Historial de Operaciones
-    html.Div(style={'marginTop': '20px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
-        html.Div("📜 Registro de Operaciones Exitosas", style={'color': '#eaecef', 'fontSize': '15px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '8px', 'marginBottom': '10px'}),
-        html.Div(id="live-table")
-    ]),
-    
-    dcc.Interval(id='interval-component', interval=1000, n_intervals=0)
-])
 
-@app.callback(
-    [Output('live-capital', 'children'),
-     Output('live-profit', 'children'),
-     Output('live-route', 'children'),
-     Output('live-total-tri', 'children'),
-     Output('live-speed', 'children'),
-     Output('live-table', 'children')],
-    [Input('interval-component', 'n_intervals')]
-)
-def update_dashboard(n):
-    cap = f"${data_compartida['capital_actual']:.2f} USDT"
-    
-    val_profit = data_compartida['mejor_profit']
-    color_prof = '#02c076' if val_profit >= MIN_PROFIT else '#f84960'
-    prof = html.Span(f"{val_profit:.4f}%", style={'color': color_prof})
-    
-    ruta = data_compartida['mejor_ruta']
-    total_tri = f"{data_compartida['total_triangulos']:,} rutas"
-    velocidad = f"{data_compartida['tiempo_escaneo']:.2f}s"
-    
-    return cap, prof, ruta, total_tri, velocidad, data_compartida["transacciones_html"]
-
-if __name__ == "__main__":
-    # --- LA CORRECCIÓN CLAVE: Encendemos el motor del bot junto a la web ---
-    hilo_bot = threading.Thread(target=bucle_bot_segundo)
-    hilo_bot.daemon = True
-    hilo_bot.start()
-    
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    # Detalles Técnicos de Motor y Datos de Red
+    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
+        html.Div("⚙️ Telemetría del Sistema y Tráfico de Red", style={'color': '#eaecef', 'fontSize': '14px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '6px', 'marginBottom': '10px'}),
+        html.Div(style={'display': 'grid', 'gridTemplateColumns': '1fr 1fr', 'gap': '10px', 'fontSize': '12px'}, children=[
+            html.Div([html.Span("Caminos Activos: ", style={'color': '#848e9c'}), html.Span(id="live-total-tri", style={'fontWeight': 'bold'})]),
+            html.Div([html.Span("Latencia API: ", style={'color': '#848e9c'}), html.Span(id="live-speed", style={'fontWeight': 'bold'})]),
