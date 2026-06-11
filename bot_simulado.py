@@ -8,7 +8,6 @@ from dash.dependencies import Input, Output
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
 
-# Parámetros del motor del bot
 MIN_PROFIT = 0.3      
 MAX_PROFIT = 5.0      
 TAKER_FEE = 0.0010     
@@ -21,7 +20,7 @@ data_compartida = {
     "total_triangulos": 0,
     "tiempo_escaneo": 0.0,
     "ultimos_spreads": [0.0] * 10,
-    "transacciones": []  
+    "transacciones_html": [html.Div("Esperando ineficiencias de mercado en OKX...", style={'color': '#848e9c', 'textAlign': 'center', 'fontSize': '12px', 'padding': '10px'})]
 }
 
 def inicializar_okx_publico():
@@ -82,6 +81,7 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 def bucle_bot_segundo():
     global CAPITAL_SIMULADO
     exchange = inicializar_okx_publico()
+    registro_trades = []
     
     try:
         markets = exchange.load_markets()
@@ -105,15 +105,17 @@ def bucle_bot_segundo():
                     ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                     CAPITAL_SIMULADO += ganancia
                     
-                    nueva_tx = {
-                        "Hora": time.strftime("%H:%M:%S"),
-                        "Ruta": mejor_ruta_texto,
-                        "Rendimiento": f"+{mejor_profit:.2f}%",
-                        "Resultado": f"${CAPITAL_SIMULADO:.2f}"
-                    }
-                    data_compartida["transacciones"].insert(0, nueva_tx)
-                    if len(data_compartida["transacciones"]) > 5:
-                        data_compartida["transacciones"].pop()
+                    # El HTML de la fila de transacciones se genera aquí directamente de forma plana
+                    nueva_fila = html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'padding': '8px 0', 'borderBottom': '1px solid #2b3139', 'fontSize': '12px'}, children=[
+                        html.Span(time.strftime("%H:%M:%S"), style={'color': '#848e9c'}),
+                        html.Span(mejor_ruta_texto, style={'fontWeight': 'bold', 'color': '#eaecef'}),
+                        html.Span(f"+{mejor_profit:.2f}%", style={'color': '#02c076', 'fontWeight': 'bold'}),
+                        html.Span(f"${CAPITAL_SIMULADO:.2f}", style={'color': '#ffffff'})
+                    ])
+                    registro_trades.insert(0, nueva_fila)
+                    if len(registro_trades) > 5:
+                        registro_trades.pop()
+                    data_compartida["transacciones_html"] = list(registro_trades)
 
                 data_compartida["capital_actual"] = CAPITAL_SIMULADO
                 data_compartida["mejor_ruta"] = mejor_ruta_texto
@@ -131,7 +133,6 @@ def bucle_bot_segundo():
     except Exception as e:
         logger.error(f"Fallo crítico: {e}")
 
-# --- ENTORNO WEB ---
 app = Dash(__name__)
 
 app.layout = html.Div(style={'backgroundColor': '#12161a', 'color': '#ffffff', 'fontFamily': 'sans-serif', 'padding': '12px', 'minHeight': '100vh'}, children=[
@@ -194,26 +195,13 @@ app.layout = html.Div(style={'backgroundColor': '#12161a', 'color': '#ffffff', '
 )
 def update_dashboard(n):
     cap = f"${data_compartida['capital_actual']:.2f}"
-    
     profit_actual = data_compartida['mejor_profit']
     color_profit = '#02c076' if profit_actual >= MIN_PROFIT else '#f84960'
     prof = html.Span(f"{profit_actual:.4f}%", style={'color': color_profit})
-    
     ruta = data_compartida['mejor_ruta']
     total_tri = f"{data_compartida['total_triangulos']:,} caminos"
-    velocidad = f"{data_compartida['tiempo_escaneo']:.2fs}"
+    velocidad = f"{data_compartida['tiempo_escaneo']:.2f}s"
     
-    barras = []
-    for val in data_compartida["ultimos_spreads"]:
-        altura = min(max(int((val + 1) * 35), 5), 80) 
-        color_barra = '#02c076' if val >= MIN_PROFIT else '#2b3139'
-        barras.append(html.Div(style={
-            'width': '6%',
-            'height': f'{altura}px',
-            'backgroundColor': color_barra,
-            'borderRadius': '3px 3px 0 0',
-            'transition': 'height 0.3s ease'
-        }))
-        
-    tx_list = data_compartida["transacciones"]
-    if not tx_list:
+    # Renderizado directo de las barras
+    barras = [
+        html.Div(style={
