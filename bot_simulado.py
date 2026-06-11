@@ -3,7 +3,7 @@ import threading
 import logging
 import ccxt
 import sys
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, redirect, url_for
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
@@ -12,6 +12,9 @@ MIN_PROFIT = 0.3
 MAX_PROFIT = 5.0      
 TAKER_FEE = 0.0010     
 CAPITAL_SIMULADO = 50.0  
+
+# Interruptor de control global
+BOT_ENCENDIDO = True
 
 data_compartida = {
     "capital_actual": CAPITAL_SIMULADO,
@@ -83,7 +86,7 @@ def calcular_arbitraje(exchange, triangulo, tickers):
     return (monto - 1.0) * 100, secuencia_texto
 
 def bucle_bot_segundo():
-    global CAPITAL_SIMULADO
+    global CAPITAL_SIMULADO, BOT_ENCENDIDO
     exchange = inicializar_okx_publico()
     registro_trades = []
     acumulado_bytes = 0
@@ -94,6 +97,14 @@ def bucle_bot_segundo():
         data_compartida["total_triangulos"] = len(triangulos)
         
         while True:
+            # Si el interruptor está apagado, el bot duerme y no consulta la API
+            if not BOT_ENCENDIDO:
+                data_compartida["mejor_ruta"] = "BOT DETENIDO / PAUSADO"
+                data_compartida["mejor_profit"] = 0.0
+                data_compartida["top_rutas_texto"] = "<p style='color:gray;'>Sistema en pausa por el usuario.</p>"
+                time.sleep(1)
+                continue
+                
             try:
                 t_inicio = time.time()
                 tickers = exchange.fetch_tickers()
@@ -152,7 +163,7 @@ def bucle_bot_segundo():
 
 app = Flask(__name__)
 
-# Шаблон, използващ изцяло чист HTML без никакви фигурни скоби в CSS стиловете
+# Diseño web con botones interactivos inyectados
 html_template = """
 <!DOCTYPE html>
 <html>
@@ -165,6 +176,15 @@ html_template = """
 <body style='background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 15px;'>
     <h2 style='text-align:center; color:#eaecef; border-bottom:1px solid #2b3139; padding-bottom:10px;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
     
+    <!-- PANEL DE CONTROL ON/OFF -->
+    <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; text-align: center;'>
+        <p style='margin: 0 0 10px 0; color:#848e9c; font-size:13px;'>Estado del Motor Principal</p>
+        <span style='background-color: {{ color_estado }}; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 14px;'>{{ texto_estado }}</span>
+        <div style='margin-top: 15px;'>
+            <a href='/toggle' style='text-decoration: none; background-color: {{ color_boton }}; color: white; padding: 10px 25px; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block;'>{{ texto_boton }} MOTOR</a>
+        </div>
+    </div>
+
     <div style='background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 15px; text-align: center;'>
         <p style='color: #848e9c; margin: 0;'>Capital Simulado Disponible</p>
         <h1 style='color:#02c076; margin: 5px 0;'>${{ "%.2f"|format(capital) }} USDT</h1>
@@ -206,24 +226,4 @@ html_template = """
 def home():
     color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
     
-    return render_template_string(
-        html_template,
-        capital=data_compartida['capital_actual'],
-        color_p=color_profit,
-        profit=data_compartida['mejor_profit'],
-        min_p=MIN_PROFIT,
-        top_3=data_compartida['top_rutas_texto'],
-        r_max=data_compartida['record_max_profit'],
-        r_min=data_compartida['record_min_profit'],
-        rutas=data_compartida['total_triangulos'],
-        latencia=data_compartida['tiempo_escaneo'],
-        peso=data_compartida['tamano_peticion_kb'],
-        total_r=data_compartida['total_datos_mb'],
-        trades=data_compartida["transacciones_texto"]
-    )
-
-if __name__ == "__main__":
-    hilo_bot = threading.Thread(target=bucle_bot_segundo)
-    hilo_bot.daemon = True
-    hilo_bot.start()
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    # Parámetros visuales del botón e indicador
