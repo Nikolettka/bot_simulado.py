@@ -28,7 +28,7 @@ TOTAL_TRADES = 4
 DICCIONARIO_MERCADOS = {}
 
 def inicializar_okx():
-    """Инициализира OKX без филтри за пазара на старта."""
+    """Инициализира OKX без излишни филтри на старта."""
     config = {
         'enableRateLimit': True,
     }
@@ -51,58 +51,77 @@ def inicializar_okx():
         return ccxt.okx(config)
 
 def buscar_todos_los_triangulos(markets):
-    """Намира триъгълници, комбинирайки Спот мостове и Фючърси."""
+    """Намира триъгълници, комбинирайки Спот мостове и Фючърси с подсигурени проверки."""
     global DICCIONARIO_MERCADOS
     pares_validos = []
     
     for symbol, market in markets.items():
-        is_active = market.get('active', True)
-        is_spot = market.get('spot', False)
-        is_swap = market.get('swap', False)
-        settle_usdt = market.get('settle') == 'USDT' or market.get('quote') == 'USDT'
-        
-        # Приемаме както USDT фючърси, така и всички спот двойки за мостове
-        if is_active and (is_spot or (is_swap and settle_usdt)):
-            pares_validos.append(symbol)
-            DICCIONARIO_MERCADOS[symbol] = {
-                'base': market['base'],
-                'quote': market['quote'],
-                'type': 'swap' if is_swap else 'spot'
-            }
+        try:
+            is_active = market.get('active', True)
+            is_spot = market.get('spot', False)
+            is_swap = market.get('swap', False)
+            
+            # Подсигурена проверка за котирана валута или сетълмент
+            quote_usdt = market.get('quote') == 'USDT'
+            settle_usdt = market.get('settle') == 'USDT' if is_swap else False
+            
+            if is_active and (is_spot or is_swap) and (quote_usdt or settle_usdt):
+                pares_validos.append(symbol)
+                DICCIONARIO_MERCADOS[symbol] = {
+                    'base': market['base'],
+                    'quote': market['quote'],
+                    'type': 'swap' if is_swap else 'spot'
+                }
+        except Exception:
+            continue
             
     logger.info(f"Общо заредени пазари (Спот + Фючърс): {len(pares_validos)}")
     
     simbolos_por_moneda = {}
     for par in pares_validos:
-        base = DICCIONARIO_MERCADOS[par]['base']
-        quote = DICCIONARIO_MERCADOS[par]['quote']
-        simbolos_por_moneda.setdefault(base, []).append(par)
-        simbolos_por_moneda.setdefault(quote, []).append(par)
+        try:
+            base = DICCIONARIO_MERCADOS[par]['base']
+            quote = DICCIONARIO_MERCADOS[par]['quote']
+            simbolos_por_moneda.setdefault(base, []).append(par)
+            simbolos_por_moneda.setdefault(quote, []).append(par)
+        except Exception:
+            continue
 
     triangulos = []
     inicio = 'USDT'
-    if inicio not in simbolos_por_moneda: return []
+    if inicio not in simbolos_por_moneda: 
+        logger.error("❌ Критично: USDT липсва в структурираните валути.")
+        return []
 
     for par1 in simbolos_por_moneda[inicio]:
-        base1 = DICCIONARIO_MERCADOS[par1]['base']
-        quote1 = DICCIONARIO_MERCADOS[par1]['quote']
-        m1 = base1 if quote1 == inicio else quote1
-        if m1 not in simbolos_por_moneda: continue
-        
-        for par2 in simbolos_por_moneda[m1]:
-            if par2 == par1: continue
-            base2 = DICCIONARIO_MERCADOS[par2]['base']
-            quote2 = DICCIONARIO_MERCADOS[par2]['quote']
-            m2 = base2 if quote2 == m1 else quote2
+        try:
+            base1 = DICCIONARIO_MERCADOS[par1]['base']
+            quote1 = DICCIONARIO_MERCADOS[par1]['quote']
+            m1 = base1 if quote1 == inicio else quote1
+            if m1 not in simbolos_por_moneda: continue
             
-            for par3 in simbolos_por_moneda[m2]:
-                if par3 == par2 or par3 == par1: continue
-                base3 = DICCIONARIO_MERCADOS[par3]['base']
-                quote3 = DICCIONARIO_MERCADOS[par3]['quote']
-                if base3 == inicio or quote3 == inicio:
-                    ruta = (par1, par2, par3)
-                    if ruta not in triangulos: 
-                        triangulos.append(ruta)
+            for par2 in simbolos_por_moneda[m1]:
+                if par2 == par1: continue
+                try:
+                    base2 = DICCIONARIO_MERCADOS[par2]['base']
+                    quote2 = DICCIONARIO_MERCADOS[par2]['quote']
+                    m2 = base2 if quote2 == m1 else quote2
+                    
+                    for par3 in simbolos_por_moneda[m2]:
+                        if par3 == par2 or par3 == par1: continue
+                        try:
+                            base3 = DICCIONARIO_MERCADOS[par3]['base']
+                            quote3 = DICCIONARIO_MERCADOS[par3]['quote']
+                            if base3 == inicio or quote3 == inicio:
+                                ruta = (par1, par2, par3)
+                                if ruta not in triangulos: 
+                                    triangulos.append(ruta)
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        except Exception:
+            continue
                         
     return triangulos
 
@@ -134,7 +153,7 @@ def calcular_arbitraje(exchange, triangulo, tickers):
     return (monto - 1.0) * 100, secuencia_texto
 
 def ejecutar_ordenes_reales(exchange, triangulo):
-    """Изпълнява пазарни поръчки, съобразявайки дали двойката е Спот или Фючърс."""
+    """Изпълнява пазарни поръчки за Спот или Фючърс пазари."""
     global DICCIONARIO_MERCADOS
     logger.info(f"🚀 [OPERACIÓN REAL] Ejecutando: {triangulo}")
     moneda_actual = "USDT"
@@ -170,7 +189,6 @@ def ejecutar_ordenes_reales(exchange, triangulo):
                     capital_flujo = (contratos * contract_size) * precio
                     moneda_actual = quote
             else:
-                # Изпълнение на Спот поръчка
                 precio = ticker['ask'] if moneda_actual == quote else ticker['bid']
                 if moneda_actual == quote:
                     cantidad = capital_flujo / precio
@@ -208,9 +226,9 @@ def ejecutar_bot():
                     if -50.0 < profit < MAX_PROFIT:
                         resultados_vuelta.append((tri, texto, profit))
 
-                resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
-                
+                # Подсигурено сортиране само ако има открити резултати
                 if resultados_vuelta:
+                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
                     mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
                     
                     if mejor_profit >= MIN_PROFIT:
@@ -223,14 +241,7 @@ def ejecutar_bot():
                             ejecutar_ordenes_reales(exchange, mejor_triangulo)
                     else:
                         logger.info(f"❌ [RECHAZADO] Ruta: {mejor_ruta_texto} | Spread: {mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} USDT (Trades: {TOTAL_TRADES})")
+                else:
+                    logger.info("⏳ Анализ на пазара: Изчакване на спредове...")
                 
             except Exception as e:
-                logger.error(f"Error en ciclo: {e}")
-                
-            time.sleep(0.8)
-
-    except Exception as e:
-        logger.error(f"Fallo crítico inicial: {e}")
-
-if __name__ == "__main__":
-    ejecutar_bot()
