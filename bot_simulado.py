@@ -3,8 +3,8 @@ import threading
 import logging
 import ccxt
 import sys
-from flask import Flask, render_template_string
-from flask_socketio import SocketIO
+import json
+from flask import Flask, render_template_string, Response
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
@@ -30,7 +30,8 @@ data_compartida = {
     "record_min_profit": 0.0,
     "top_rutas_texto": "Cargando rutas...",
     "transacciones_texto": "Esperando oportunidades (>= 0.3%)...",
-    "ultima_hora": "00:00:00"
+    "ultima_hora": "00:00:00",
+    "mejor_profit": 0.0
 }
 
 def inicializar_okx_publico():
@@ -91,7 +92,7 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
     return (monto - 1.0) * 100, secuencia_texto, detalles_precios
 
-def bucle_bot_segundo(socketio_instance):
+def bucle_bot_segundo():
     global CAPITAL_SIMULADO, BOT_ENCENDIDO, CONEXION_OKX, TOTAL_TRADES
     exchange = inicializar_okx_publico()
     registro_trades = []
@@ -109,7 +110,6 @@ def bucle_bot_segundo(socketio_instance):
     while True:
         if not BOT_ENCENDIDO:
             data_compartida["top_rutas_texto"] = "<div style='color:gray;text-align:center;'>Bot en pausa.</div>"
-            socketio_instance.emit('update_data', obtener_payload_datos())
             time.sleep(2)
             continue
             
@@ -162,14 +162,12 @@ def bucle_bot_segundo(socketio_instance):
             data_compartida["tiempo_escaneo"] = time.time() - t_inicio
             data_compartida["ultima_hora"] = time.strftime("%H:%M:%S")
 
-            socketio_instance.emit('update_data', obtener_payload_datos())
-
         except Exception as e:
             logger.error(f"Error ciclo: {e}")
             
         time.sleep(3)
 
-def obtener_payload_datos():
+def generar_payload():
     color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
     comision_estimada = CAPITAL_SIMULADO * 0.0030
     
@@ -198,7 +196,6 @@ def obtener_payload_datos():
     }
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
 
 @app.route('/')
 def home():
@@ -206,7 +203,17 @@ def home():
         with open('index.html', 'r', encoding='utf-8') as f:
             return render_template_string(f.read())
     except Exception:
-        return "Error crítico cargando archivo index.html"
+        return "Error cargando index.html"
+
+@app.route('/stream')
+def stream():
+    """Canal continuo SSE que inyecta datos sin consumir megas de recarga."""
+    def event_stream():
+        while True:
+            payload = json.dumps(generar_payload())
+            yield f"data: {payload}\n\n"
+            time.sleep(1.5)
+    return Response(event_stream(), mimetype="text/event-stream")
 
 @app.route('/toggle')
 def toggle_bot():
@@ -215,8 +222,7 @@ def toggle_bot():
     return "", 204
 
 if __name__ == "__main__":
-    hilo_bot = threading.Thread(target=bucle_bot_segundo, args=(socketio,))
+    hilo_bot = threading.Thread(target=bucle_bot_segundo)
     hilo_bot.daemon = True
     hilo_bot.start()
-    # Ejecución forzada compatible con Railway y WebSockets masivos
-    socketio.run(app, host='0.0.0.0', port=8080, debug=False, allow_unsafe_werkzeug=True)
+    app.run(host='0.0.0.0', port=8080, debug=False)
