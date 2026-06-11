@@ -195,7 +195,7 @@ def ejecutar_bot():
                     resultados_vuelta.append((tri, texto, profit))
             if resultados_vuelta:
                 resultados_vuelta.sort(key=lambda x: x, reverse=True)
-                mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
                 
                 hora_actual = time.strftime("%H:%M:%S")
                 ULTIMO_SPREAD = mejor_profit
@@ -219,4 +219,4 @@ def ejecutar_bot():
     except Exception as e:
         logger.error(f"Fallo: {e}")
 
-if __name__ == "__main__":
+# Изпълнение на кода без чупливи структури (Линейно)
