@@ -115,15 +115,21 @@ def ejecutar_bot():
                 tickers  = exchange.fetch_tickers()
                 now_ms   = exchange.milliseconds()
                 mejores  = []
+                todas    = []   # todos los resultados válidos para log
 
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(tri, tickers, now_ms)
-
+                    if not isinstance(profit, float):
+                        continue  # garantía extra de tipo
+                    if profit > -900 and texto:
+                        todas.append((texto, profit))
                     # FIX [1]: aplicar filtro MAX_PROFIT
                     if MIN_PROFIT <= profit <= MAX_PROFIT:
                         mejores.append((texto, profit))
 
+                # sort seguro: ambos elementos son (str, float)
                 mejores.sort(key=lambda x: x[1], reverse=True)
+                todas.sort(key=lambda x: x[1], reverse=True)
 
                 if mejores:
                     mejor_texto, mejor_profit = mejores[0]
@@ -134,21 +140,14 @@ def ejecutar_bot():
                         f"💰 [TRADE #{TOTAL_TRADES}] {mejor_texto} | "
                         f"+{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f}"
                     )
-                else:
-                    # Mejor oportunidad fuera del rango (log informativo)
-                    all_valid = [
-                        (t, p) for tri in triangulos
-                        for t, p in [calcular_arbitraje(tri, tickers, now_ms)]
-                        if p > -900
-                    ]
-                    if all_valid:
-                        all_valid.sort(key=lambda x: x[1], reverse=True)
-                        mejor_texto, mejor_profit = all_valid[0]
-                        logger.info(
-                            f"❌ [RECHAZADO] {mejor_texto} | "
-                            f"{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} "
-                            f"(Trades: {TOTAL_TRADES})"
-                        )
+                elif todas:
+                    # Mejor oportunidad fuera del rango — reusar lista ya calculada
+                    mejor_texto, mejor_profit = todas[0]
+                    logger.info(
+                        f"❌ [RECHAZADO] {mejor_texto} | "
+                        f"{mejor_profit:.4f}% | Saldo: ${CAPITAL_SIMULADO:.2f} "
+                        f"(Trades: {TOTAL_TRADES})"
+                    )
 
             except ccxt.NetworkError as e:
                 logger.warning(f"Error de red (reintentando): {e}")
