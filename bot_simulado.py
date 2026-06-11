@@ -9,9 +9,10 @@ from flask import Flask, render_template_string, Response
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
 
-MIN_PROFIT = 0.3      
+# --- AJUSTE MATEMÁTICO REAL OKX ---
+TAKER_FEE = 0.0010       # 0.10% de comisión estándar por operación en OKX SPOT
+MIN_PROFIT = 0.35        # Umbral optimizado: Cubre 0.30% de comisiones triples + 0.05% ganancia neta
 MAX_PROFIT = 5.0      
-TAKER_FEE = 0.0010     
 CAPITAL_INICIAL = 50.0
 CAPITAL_SIMULADO = 50.0  
 
@@ -29,7 +30,7 @@ data_compartida = {
     "record_max_profit": 0.0,
     "record_min_profit": 0.0,
     "top_rutas_texto": "Cargando rutas...",
-    "transacciones_texto": "Esperando oportunidades (>= 0.3%)...",
+    "transacciones_texto": "Esperando spread rentable (>= 0.35%)...",
     "ultima_hora": "00:00:00",
     "mejor_profit": 0.0
 }
@@ -145,6 +146,7 @@ def bucle_bot_segundo():
             if mejor_profit < data_compartida["record_min_profit"] and mejor_profit > -10.0:
                 data_compartida["record_min_profit"] = mejor_profit
 
+            # Ejecución optimizada post-comisiones
             if mejor_profit >= MIN_PROFIT:
                 TOTAL_TRADES += 1
                 ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
@@ -207,7 +209,6 @@ def home():
 
 @app.route('/stream')
 def stream():
-    """Canal continuo SSE que inyecta datos sin consumir megas de recarga."""
     def event_stream():
         while True:
             payload = json.dumps(generar_payload())
