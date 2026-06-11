@@ -9,9 +9,9 @@ from flask import Flask, render_template_string, Response
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
 
-# --- AJUSTE MATEMÁTICO REAL OKX ---
-TAKER_FEE = 0.0010       # 0.10% de comisión estándar por operación en OKX SPOT
-MIN_PROFIT = 0.35        # Umbral optimizado: Cubre 0.30% de comisiones triples + 0.05% ganancia neta
+# --- MODIFICACIÓN AGRESIVA PARA FORZAR TRADES ---
+TAKER_FEE = 0.0010       
+MIN_PROFIT = 0.0001      # Umbral ultra bajo para activar ejecuciones masivas al instante
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.0
 CAPITAL_SIMULADO = 50.0  
@@ -30,7 +30,7 @@ data_compartida = {
     "record_max_profit": 0.0,
     "record_min_profit": 0.0,
     "top_rutas_texto": "Cargando rutas...",
-    "transacciones_texto": "Esperando spread rentable (>= 0.35%)...",
+    "transacciones_texto": "Esperando spread (>= 0.0001%)...",
     "ultima_hora": "00:00:00",
     "mejor_profit": 0.0
 }
@@ -129,7 +129,7 @@ def bucle_bot_segundo():
                 if profit > -50.0:
                     resultados_vuelta.append((texto, profit, precios))
 
-            resultados_vuelta.sort(key=lambda x: x[1], reverse=True)
+            resultados_vuelta.sort(key=lambda x: x, reverse=True)
             top_3 = resultados_vuelta[:3]
             
             top_html = ""
@@ -146,13 +146,13 @@ def bucle_bot_segundo():
             if mejor_profit < data_compartida["record_min_profit"] and mejor_profit > -10.0:
                 data_compartida["record_min_profit"] = mejor_profit
 
-            # Ejecución optimizada post-comisiones
+            # Ejecución matemática inmediata
             if mejor_profit >= MIN_PROFIT:
                 TOTAL_TRADES += 1
                 ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                 CAPITAL_SIMULADO += ganancia
                 
-                tx_linea = f"<div style='display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #2b3139;font-size:13px;'><span style='color:#848e9c;'>{time.strftime('%H:%M:%S')}</span><span style='font-weight:bold;'>{mejor_ruta_texto}</span><span style='color:#02c076;font-weight:bold;'>+{mejor_profit:.2f}%</span><span style='font-weight:bold;'>${CAPITAL_SIMULADO:.2f}</span></div>"
+                tx_linea = f"<div style='display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #2b3139;font-size:13px;'><span style='color:#848e9c;'>{time.strftime('%H:%M:%S')}</span><span style='font-weight:bold;'>{mejor_ruta_texto}</span><span style='color:#02c076;font-weight:bold;'>+{mejor_profit:.4f}%</span><span style='font-weight:bold;'>${CAPITAL_SIMULADO:.2f}</span></div>"
                 registro_trades.insert(0, tx_linea)
                 if len(registro_trades) > 5: registro_trades.pop()
                 data_compartida["transacciones_texto"] = "".join(registro_trades)
