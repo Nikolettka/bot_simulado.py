@@ -187,33 +187,36 @@ def ejecutar_bot():
         triangulos = buscar_todos_los_triangulos(markets)
         logger.info(f"Estructura lista para monitoreo.")
         while True:
-            try:
-                tickers = exchange.fetch_tickers()
-                resultados_vuelta = []
-                for tri in triangulos:
-                    profit, texto = calcular_arbitraje(exchange, tri, tickers)
-                    if -50.0 < profit < MAX_PROFIT:
-                        resultados_vuelta.append((tri, texto, profit))
-                if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
-                    
-                    hora_actual = time.strftime("%H:%M:%S")
-                    ULTIMO_SPREAD = mejor_profit
-                    ULTIMA_RUTA = mejor_ruta_texto
-                    ULTIMO_REFRESCO = hora_actual
-                    
-                    if mejor_profit >= MIN_PROFIT:
-                        TOTAL_TRADES += 1
-                        ganancia_trade = CAPITAL_SIMULADO * (mejor_profit / 100)
-                        CAPITAL_SIMULADO += ganancia_trade
-                        HISTORIAL_EXITOSAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
-                        if len(HISTORIAL_EXITOSAS) > 5:
-                            HISTORIAL_EXITOSAS.pop(0)
-                        logger.info(f"TRADE OK: {mejor_ruta_texto}")
-                    else:
-                        HISTORIAL_RECHAZADAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
-                        if len(HISTORIAL_RECHAZADAS) > 5:
-                            HISTORIAL_RECHAZADAS.pop(0)
-                        logger.info(f"Scan... | Max: {mejor_profit:.4f}%")
-            except Exception:
+            tickers = exchange.fetch_tickers()
+            resultados_vuelta = []
+            for tri in triangulos:
+                profit, texto = calcular_arbitraje(exchange, tri, tickers)
+                if -50.0 < profit < MAX_PROFIT:
+                    resultados_vuelta.append((tri, texto, profit))
+            if resultados_vuelta:
+                resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                
+                hora_actual = time.strftime("%H:%M:%S")
+                ULTIMO_SPREAD = mejor_profit
+                ULTIMA_RUTA = mejor_ruta_texto
+                ULTIMO_REFRESCO = hora_actual
+                
+                if mejor_profit >= MIN_PROFIT:
+                    TOTAL_TRADES += 1
+                    ganancia_trade = CAPITAL_SIMULADO * (mejor_profit / 100)
+                    CAPITAL_SIMULADO += ganancia_trade
+                    HISTORIAL_EXITOSAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
+                    if len(HISTORIAL_EXITOSAS) > 5:
+                        HISTORIAL_EXITOSAS.pop(0)
+                    logger.info(f"TRADE OK: {mejor_ruta_texto}")
+                else:
+                    HISTORIAL_RECHAZADAS.append({"hora": hora_actual, "ruta": mejor_ruta_texto, "profit": mejor_profit})
+                    if len(HISTORIAL_RECHAZADAS) > 5:
+                        HISTORIAL_RECHAZADAS.pop(0)
+                    logger.info(f"Scan... | Max: {mejor_profit:.4f}%")
+            time.sleep(2.0)
+    except Exception as e:
+        logger.error(f"Fallo: {e}")
+
+if __name__ == "__main__":
