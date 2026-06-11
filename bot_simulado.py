@@ -2,28 +2,23 @@ import time
 import threading
 import logging
 import ccxt
-import pandas as pd
 from dash import Dash, html, dcc
 from dash.dependencies import Input, Output
-import plotly.graph_objs as go
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
 
-# Parámetros del simulador agresivo
+# Configuración del motor del bot
 MIN_PROFIT = 0.3      
 MAX_PROFIT = 5.0      
 TAKER_FEE = 0.0010     
 CAPITAL_SIMULADO = 50.0  
 
-# Memoria global expandida para el Dashboard masivo
 data_compartida = {
     "capital_actual": CAPITAL_SIMULADO,
     "mejor_ruta": "Escaneando OKX...",
     "mejor_profit": 0.0,
-    "historial_balance": [50.0],  # Puntos para el gráfico de línea
-    "tiempos": [time.strftime("%H:%M:%S")],
-    "transacciones": []  # Registro de trades completados
+    "transacciones": []  
 }
 
 def inicializar_okx_publico():
@@ -101,33 +96,24 @@ def bucle_bot_segundo():
                         mejor_profit = profit
                         mejor_ruta_texto = texto
 
-                # Si hay ganancia simulada, se ejecuta la acción
+                # Si el spread supera el mínimo, se ejecuta la transacción
                 if mejor_profit >= MIN_PROFIT:
                     ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                     CAPITAL_SIMULADO += ganancia
                     
-                    # Añadir al historial de transacciones visibles
                     nueva_tx = {
                         "Hora": time.strftime("%H:%M:%S"),
                         "Ruta": mejor_ruta_texto,
                         "Rendimiento": f"+{mejor_profit:.3f}%",
-                        "Resultado": f"${CAPITAL_SIMULADO:.2f} USDT"
+                        "Resultado": f"${CAPITAL_SIMULADO:.2f}"
                     }
                     data_compartida["transacciones"].insert(0, nueva_tx)
-                    if len(data_compartida["transacciones"]) > 10:
+                    if len(data_compartida["transacciones"]) > 8:
                         data_compartida["transacciones"].pop()
 
-                # Guardar datos métricos continuos para la gráfica lineal
                 data_compartida["capital_actual"] = CAPITAL_SIMULADO
                 data_compartida["mejor_ruta"] = mejor_ruta_texto
                 data_compartida["mejor_profit"] = mejor_profit
-                
-                data_compartida["historial_balance"].append(CAPITAL_SIMULADO)
-                data_compartida["tiempos"].append(time.strftime("%H:%M:%S"))
-                
-                if len(data_compartida["historial_balance"]) > 50:
-                    data_compartida["historial_balance"].pop(0)
-                    data_compartida["tiempos"].pop(0)
 
             except Exception as e:
                 logger.error(f"Error ciclo: {e}")
@@ -136,40 +122,40 @@ def bucle_bot_segundo():
     except Exception as e:
         logger.error(f"Fallo crítico: {e}")
 
-# --- ENTORNO WEB MASIVO ---
+# --- DISEÑO DEL PANEL MÓVIL ESTILO EXCHANGE ---
 app = Dash(__name__)
 
-app.layout = html.Div(style={'backgroundColor': '#0b0e11', 'color': '#eaecef', 'fontFamily': 'sans-serif', 'padding': '15px'}, children=[
-    html.H1("⚡ OKX PRO ARBITRAGE", style={'textAlign': 'center', 'color': '#f0b90b', 'fontSize': '26px'}),
+app.layout = html.Div(style={'backgroundColor': '#12161a', 'color': '#ffffff', 'fontFamily': 'sans-serif', 'padding': '12px', 'minHeight': '100vh'}, children=[
+    html.H2("⚡ OKX ARBITRAGE PRO", style={'textAlign': 'center', 'color': '#eaecef', 'fontSize': '20px', 'letterSpacing': '1px', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '10px'}),
     
-    # Tarjetas principales
+    # Tarjeta de Balance
+    html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '20px', 'marginTop': '15px', 'boxShadow': '0px 4px 6px rgba(0,0,0,0.2)'}, children=[
+        html.Div("Capital Simulado Disponible", style={'color': '#848e9c', 'fontSize': '14px', 'textAlign': 'center'}),
+        html.Div(id="live-capital", style={'color': '#02c076', 'fontSize': '32px', 'fontWeight': 'bold', 'textAlign': 'center', 'marginTop': '5px'})
+    ]),
+    
+    # Grid de Estado del Mercado
     html.Div(style={'display': 'flex', 'gap': '10px', 'marginTop': '15px'}, children=[
-        html.Div(style={'backgroundColor': '#1e2329', 'padding': '15px', 'borderRadius': '8px', 'flex': '1', 'textAlign': 'center'}, children=[
-            html.Span("Capital Disponible", style={'color': '#848e9c', 'fontSize': '12px'}),
-            html.H2(id="live-capital", style={'color': '#02c076', 'fontSize': '20px', 'marginTop': '5px'})
+        html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px', 'flex': '1', 'textAlign': 'center'}, children=[
+            html.Div("Spread Máximo", style={'color': '#848e9c', 'fontSize': '13px'}),
+            html.Div(id="live-profit", style={'fontSize': '20px', 'fontWeight': 'bold', 'marginTop': '5px'})
         ]),
-        html.Div(style={'backgroundColor': '#1e2329', 'padding': '15px', 'borderRadius': '8px', 'flex': '1', 'textAlign': 'center'}, children=[
-            html.Span("Spread Máximo", style={'color': '#848e9c', 'fontSize': '12px'}),
-            html.H2(id="live-profit", style={'color': '#f84960', 'fontSize': '20px', 'marginTop': '5px'})
+        html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px', 'flex': '1', 'textAlign': 'center'}, children=[
+            html.Div("Filtro Mínimo", style={'color': '#848e9c', 'fontSize': '13px'}),
+            html.Div(f"+{MIN_PROFIT}%", style={'color': '#f0b90b', 'fontSize': '20px', 'fontWeight': 'bold', 'marginTop': '5px'})
         ])
     ]),
     
-    # Ruta en tiempo real
-    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e2329', 'padding': '15px', 'borderRadius': '8px'}, children=[
-        html.Span("Cadena Evaluada Óptima:", style={'color': '#848e9c', 'fontSize': '12px'}),
-        html.H3(id="live-route", style={'color': '#f0b90b', 'marginTop': '5px', 'fontSize': '18px', 'textAlign': 'center'})
+    # Contenedor de Ruta Óptima
+    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
+        html.Div("Mejor Ruta Detectada (1s):", style={'color': '#848e9c', 'fontSize': '13px', 'marginBottom': '5px'}),
+        html.Div(id="live-route", style={'color': '#f0b90b', 'fontSize': '18px', 'fontWeight': 'bold', 'textAlign': 'center', 'fontFamily': 'monospace'})
     ]),
     
-    # Gráfica del capital interactiva
-    html.Div(style={'marginTop': '20px', 'backgroundColor': '#1e2329', 'borderRadius': '8px', 'padding': '10px'}, children=[
-        html.H4("Evolución del Balance ($)", style={'paddingLeft': '10px', 'color': '#eaecef'}),
-        dcc.Graph(id="live-graph", config={'displayModeBar': False}, style={'height': '220px'})
-    ]),
-    
-    # Tabla de Órdenes Ejecutadas
-    html.Div(style={'marginTop': '20px', 'backgroundColor': '#1e2329', 'borderRadius': '8px', 'padding': '15px'}, children=[
-        html.H4("📜 Últimas Operaciones Ejecutadas (Simuladas)", style={'color': '#f0b90b', 'marginBottom': '10px'}),
-        html.Div(id="live-table", style={'overflowX': 'auto'})
+    # Historial de trades en formato lista limpia
+    html.Div(style={'marginTop': '20px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
+        html.Div("📋 Registro de Operaciones Exitosas", style={'color': '#eaecef', 'fontSize': '15px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '8px', 'marginBottom': '10px'}),
+        html.Div(id="live-table")
     ]),
     
     dcc.Interval(id='interval-component', interval=1500, n_intervals=0)
@@ -179,50 +165,34 @@ app.layout = html.Div(style={'backgroundColor': '#0b0e11', 'color': '#eaecef', '
     [Output('live-capital', 'children'),
      Output('live-profit', 'children'),
      Output('live-route', 'children'),
-     Output('live-graph', 'figure'),
      Output('live-table', 'children')],
     [Input('interval-component', 'n_intervals')]
 )
 def update_dashboard(n):
-    cap = f"${data_compartida['capital_actual']:.4f} USDT"
-    prof = f"{data_compartida['mejor_profit']:.4f}%"
+    cap = f"${data_compartida['capital_actual']:.4f}"
+    
+    # El color cambia a verde si el spread actual es rentable
+    profit_actual = data_compartida['mejor_profit']
+    color_profit = '#02c076' if profit_actual >= MIN_PROFIT else '#f84960'
+    prof = html.Span(f"{profit_actual:.4f}%", style={'color': color_profit})
+    
     ruta = data_compartida['mejor_ruta']
     
-    # Renderizado de gráfico lineal
-    fig = go.Figure(data=[go.Scatter(
-        x=data_compartida["tiempos"],
-        y=data_compartida["historial_balance"],
-        mode='lines+markers',
-        line=dict(color='#02c076', width=2),
-        marker=dict(size=4, color='#f0b90b')
-    )])
-    fig.update_layout(
-        margin=dict(l=40, r=10, t=10, b=35),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=False, tickcolor='#848e9c', font=dict(color='#848e9c', size=10)),
-        yaxis=dict(showgrid=True, gridcolor='#2b3139', tickcolor='#848e9c', font=dict(color='#848e9c', size=10))
-    )
-    
-    # Construcción de la tabla de registros en HTML
+    # Formateo de lista de transacciones estilo bloque móvil
     tx_list = data_compartida["transacciones"]
     if not tx_list:
-        tabla_html = html.Div("Esperando ineficiencias de mercado (≥ 0.3%)...", style={'color': '#848e9c', 'textAlign': 'center', 'fontSize': '13px', 'padding': '10px'})
+        lista_html = html.Div("Buscando ineficiencias en OKX...", style={'color': '#848e9c', 'textAlign': 'center', 'fontSize': '13px', 'padding': '15px'})
     else:
-        rows = [
-            html.Tr([
-                html.Td(tx["Hora"], style={'padding': '8px', 'borderBottom': '1px solid #2b3139'}),
-                html.Td(tx["Ruta"], style={'padding': '8px', 'borderBottom': '1px solid #2b3139'}),
-                html.Td(tx["Rendimiento"], style={'padding': '8px', 'borderBottom': '1px solid #2b3139', 'color': '#02c076'}),
-                html.Td(tx["Resultado"], style={'padding': '8px', 'borderBottom': '1px solid #2b3139'})
+        lista_html = html.Div([
+            html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'padding': '10px 0', 'borderBottom': '1px solid #2b3139', 'fontSize': '13px'}, children=[
+                html.Span(tx["Hora"], style={'color': '#848e9c'}),
+                html.Span(tx["Ruta"], style={'fontWeight': 'bold', 'color': '#eaecef'}),
+                html.Span(tx["Rendimiento"], style={'color': '#02c076', 'fontWeight': 'bold'}),
+                html.Span(tx["Resultado"], style={'color': '#ffffff'})
             ]) for tx in tx_list
-        ]
-        tabla_html = html.Table(
-            [html.Tr([html.Th("Hora"), html.Th("Ruta"), html.Th("Prof"), html.Th("Total")], style={'textAlign': 'left', 'color': '#848e9c', 'fontSize': '12px'})] + rows,
-            style={'width': '100%', 'fontSize': '13px', 'borderCollapse': 'collapse'}
-        )
+        ])
         
-    return cap, prof, ruta, fig, tabla_html
+    return cap, prof, ruta, lista_html
 
 if __name__ == "__main__":
     hilo_bot = threading.Thread(target=bucle_bot_segundo)
