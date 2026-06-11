@@ -13,7 +13,6 @@ MAX_PROFIT = 5.0
 TAKER_FEE = 0.0010     
 CAPITAL_SIMULADO = 50.0  
 
-# Almacenamiento plano en memoria global
 data_compartida = {
     "capital_actual": CAPITAL_SIMULADO,
     "total_triangulos": 0,
@@ -73,11 +72,11 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
         if moneda_actual == quote:
             monto = (monto / ticker['ask']) * (1 - TAKER_FEE)
-            secuencia_texto += f"{base}"
+            secuencia_texto += base
             moneda_actual = base
         else:
             monto = (monto * ticker['bid']) * (1 - TAKER_FEE)
-            secuencia_texto += f"{quote}"
+            secuencia_texto += quote
             moneda_actual = quote
         if i < 2: secuencia_texto += ">"
 
@@ -113,14 +112,17 @@ def bucle_bot_segundo():
                 resultados_vuelta.sort(key=lambda x: x[1], reverse=True)
                 top_3 = resultados_vuelta[:3]
                 
-                # Construir string HTML plano para el Top 3 sin objetos Dash
                 top_html = ""
                 for i, r in enumerate(top_3):
                     color = "#02c076" if r[1] >= MIN_PROFIT else "#f84960"
                     top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r[0]}</span><span style='color:{color};font-weight:bold;'>{r[1]:.4f}%</span></div>"
                 data_compartida["top_rutas_texto"] = top_html
 
-                mejor_ruta_texto, mejor_profit = top_3[0] if top_3 else ("N/A", 0.0)
+                if top_3:
+                    mejor_ruta_texto, mejor_profit = top_3[0]
+                else:
+                    mejor_ruta_texto, mejor_profit = "N/A", 0.0
+                    
                 data_compartida["mejor_ruta"] = mejor_ruta_texto
                 data_compartida["mejor_profit"] = mejor_profit
 
@@ -148,15 +150,14 @@ def bucle_bot_segundo():
     except Exception as e:
         logger.error(f"Fallo critico: {e}")
 
-# --- INTERFAZ WEB FLASK CRUDA (CERO ERRORES DE DASH) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
     
-    # Plantilla HTML inyectada directamente como texto puro
-    html_template = f"""
+    # Шаблонът вече използва стандартни HTML тагове без конфликти с Python форматирането
+    html_template = """
     <!DOCTYPE html>
     <html>
     <head>
@@ -165,13 +166,13 @@ def home():
         <title>OKX ARBITRAGE ULTRA PRO</title>
         <meta http-equiv='refresh' content='1'>
         <style>
-            body {{ background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }}
-            .card {{ background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }}
-            .grid {{ display: flex; gap: 10px; margin-top: 12px; }}
-            .col {{ flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }}
-            .label {{ color: #848e9c; font-size: 12px; }}
-            .value {{ font-size: 18px; font-weight: bold; margin-top: 4px; }}
-            .telemetria {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }}
+            body { background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }
+            .card { background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }
+            .grid { display: flex; gap: 10px; margin-top: 12px; }
+            .col { flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }
+            .label { color: #848e9c; font-size: 12px; }
+            .value { font-size: 18px; font-weight: bold; margin-top: 4px; }
+            .telemetria { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }
         </style>
     </head>
     <body>
@@ -179,42 +180,54 @@ def home():
         
         <div class='card' style='text-align:center;'>
             <div class='label'>Capital Simulado Disponible</div>
-            <div style='color:#02c076;font-size:36px;font-weight:bold;margin-top:5px;'>${data_compartida['capital_actual']:.2f} USDT</div>
+            <div style='color:#02c076;font-size:36px;font-weight:bold;margin-top:5px;'>${capital:.2f} USDT</div>
         </div>
         
         <div class='grid'>
             <div class='col'>
-                <div class='label'>Spread Máximo</div>
-                <div class='value' style='color:{color_profit};'>{data_compartida['mejor_profit']:.4f}%</div>
+                <div class='label'>Spread Maximo</div>
+                <div class='value' style='color:{color_p};'>{profit:.4f}%</div>
             </div>
             <div class='col'>
-                <div class='label'>Filtro Mínimo</div>
-                <div class='value' style='color:#f0b90b;'>+{MIN_PROFIT}%</div>
+                <div class='label'>Filtro Minimo</div>
+                <div class='value' style='color:#f0b90b;'>+{min_p}%</div>
             </div>
         </div>
 
         <div class='card'>
-            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Más Rentables OKX</div>
-            {data_compartida['top_rutas_texto']}
+            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Mas Rentables OKX</div>
+            {top_3}
         </div>
 
         <div class='card'>
-            <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesión)</div>
+            <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesion)</div>
             <div style='display:flex;justify-content:space-between;font-size:13px;'>
-                <div><span class='label'>Max Spread:</span> <span style='color:#02c076;font-weight:bold;'>{data_compartida['record_max_profit']:.4f}%</span></div>
-                <div><span class='label'>Min Spread:</span> <span style='color:#f84960;font-weight:bold;'>{data_compartida['record_min_profit']:.4f}%</span></div>
+                <div><span class='label'>Max Spread:</span> <span style='color:#02c076;font-weight:bold;'>{r_max:.4f}%</span></div>
+                <div><span class='label'>Min Spread:</span> <span style='color:#f84960;font-weight:bold;'>{r_min:.4f}%</span></div>
             </div>
         </div>
 
         <div class='card'>
-            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetría y Tráfico de Red</div>
+            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetria y Trafico de Red</div>
             <div class='telemetria'>
-                <div><span class='label'>Rutas:</span> <b>{data_compartida['total_triangulos']:,}</b></div>
-                <div><span class='label'>Latencia:</span> <b>{data_compartida['tiempo_escaneo']:.2f}s</b></div>
-                <div><span class='label'>Petición:</span> <b>{data_compartida['tamano_peticion_kb']:.1f} KB</b></div>
-                <div><span class='label'>Total Red:</span> <b>{data_compartida['total_datos_mb']:.2f} MB</b></div>
+                <div><span class='label'>Rutas:</span> <b>{rutas:,}</b></div>
+                <div><span class='label'>Latencia:</span> <b>{latencia:.2f}s</b></div>
+                <div><span class='label'>Peticion:</span> <b>{peso:.1f} KB</b></div>
+                <div><span class='label'>Total Red:</span> <b>{total_r:.2f} MB</b></div>
             </div>
         </div>
 
         <div class='card'>
             <div class='label' style='border-bottom:1px solid #2b3139;padding-bottom:6px;margin-bottom:8px;font-weight:bold;color:#eaecef;'>📜 Registro de Operaciones Exitosas</div>
+            {trades}
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Безопасно вграждане на променливите без f-string конфликти
+    return html_template.format(
+        capital=data_compartida['capital_actual'],
+        color_p=color_profit,
+        profit=data_compartida['mejor_profit'],
+        min_p=MIN_PROFIT,
