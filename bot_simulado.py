@@ -3,8 +3,7 @@ import threading
 import logging
 import ccxt
 import sys
-from dash import Dash, html, dcc
-from dash.dependencies import Input, Output
+from flask import Flask
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger()
@@ -14,16 +13,19 @@ MAX_PROFIT = 5.0
 TAKER_FEE = 0.0010     
 CAPITAL_SIMULADO = 50.0  
 
+# Almacenamiento plano en memoria global
 data_compartida = {
     "capital_actual": CAPITAL_SIMULADO,
     "total_triangulos": 0,
     "tiempo_escaneo": 0.0,
     "tamano_peticion_kb": 0.0,
     "total_datos_mb": 0.0,
-    "record_max_profit": -999.0,
-    "record_min_profit": 999.0,
-    "top_rutas": [("N/A", 0.0), ("N/A", 0.0), ("N/A", 0.0)],
-    "transacciones_html": [html.Div("Esperando oportunidades (>= 0.3%)...", style={'color': '#848e9c', 'textAlign': 'center', 'padding': '10px'})]
+    "record_max_profit": 0.0,
+    "record_min_profit": 0.0,
+    "mejor_ruta": "N/A",
+    "mejor_profit": 0.0,
+    "top_rutas_texto": "Cargando datos...",
+    "transacciones_texto": "Esperando oportunidades (>= 0.3%)..."
 }
 
 def inicializar_okx_publico():
@@ -97,7 +99,6 @@ def bucle_bot_segundo():
                 t_inicio = time.time()
                 tickers = exchange.fetch_tickers()
                 
-                # Calcular el peso de los datos recibidos de la API de OKX
                 peso_bytes = sys.getsizeof(str(tickers))
                 acumulado_bytes += peso_bytes
                 data_compartida["tamano_peticion_kb"] = peso_bytes / 1024
@@ -106,39 +107,36 @@ def bucle_bot_segundo():
                 resultados_vuelta = []
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
-                    if profit > -50.0:  # Evita errores de tickers vacíos
+                    if profit > -50.0:
                         resultados_vuelta.append((texto, profit))
 
-                # Ordenar todos los caminos evaluados de mayor a menor beneficio
                 resultados_vuelta.sort(key=lambda x: x[1], reverse=True)
-                
-                # Extraer el Top 3
                 top_3 = resultados_vuelta[:3]
-                while len(top_3) < 3: top_3.append(("N/A", 0.0))
-                data_compartida["top_rutas"] = top_3
+                
+                # Construir string HTML plano para el Top 3 sin objetos Dash
+                top_html = ""
+                for i, r in enumerate(top_3):
+                    color = "#02c076" if r[1] >= MIN_PROFIT else "#f84960"
+                    top_html += f"<div style='display:flex;justify-content:space-between;padding:6px 0;font-family:monospace;font-size:14px;border-bottom:1px solid #2b3139;'><span>#{i+1} {r[0]}</span><span style='color:{color};font-weight:bold;'>{r[1]:.4f}%</span></div>"
+                data_compartida["top_rutas_texto"] = top_html
 
-                mejor_ruta_texto, mejor_profit = top_3[0]
+                mejor_ruta_texto, mejor_profit = top_3[0] if top_3 else ("N/A", 0.0)
+                data_compartida["mejor_ruta"] = mejor_ruta_texto
+                data_compartida["mejor_profit"] = mejor_profit
 
-                # Récords históricos de la sesión
                 if mejor_profit > data_compartida["record_max_profit"]:
                     data_compartida["record_max_profit"] = mejor_profit
                 if mejor_profit < data_compartida["record_min_profit"] and mejor_profit > -10.0:
                     data_compartida["record_min_profit"] = mejor_profit
 
-                # Ejecutar trade simulado si supera el spread requerido
                 if mejor_profit >= MIN_PROFIT:
                     ganancia = CAPITAL_SIMULADO * (mejor_profit / 100)
                     CAPITAL_SIMULADO += ganancia
                     
-                    nueva_fila = html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'padding': '10px 5px', 'borderBottom': '1px solid #2b3139'}, children=[
-                        html.Span(time.strftime("%H:%M:%S"), style={'color': '#848e9c'}),
-                        html.Span(mejor_ruta_texto, style={'fontWeight': 'bold', 'color': '#eaecef'}),
-                        html.Span(f"+{mejor_profit:.2f}%", style={'color': '#02c076', 'fontWeight': 'bold'}),
-                        html.Span(f"${CAPITAL_SIMULADO:.2f}", style={'color': '#ffffff', 'fontWeight': 'bold'})
-                    ])
-                    registro_trades.insert(0, nueva_fila)
+                    tx_linea = f"<div style='display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #2b3139;font-size:13px;'><span style='color:#848e9c;'>{time.strftime('%H:%M:%S')}</span><span style='font-weight:bold;'>{mejor_ruta_texto}</span><span style='color:#02c076;font-weight:bold;'>+{mejor_profit:.2f}%</span><span style='font-weight:bold;'>${CAPITAL_SIMULADO:.2f}</span></div>"
+                    registro_trades.insert(0, tx_linea)
                     if len(registro_trades) > 5: registro_trades.pop()
-                    data_compartida["transacciones_html"] = list(registro_trades)
+                    data_compartida["transacciones_texto"] = "".join(registro_trades)
 
                 data_compartida["capital_actual"] = CAPITAL_SIMULADO
                 data_compartida["tiempo_escaneo"] = time.time() - t_inicio
@@ -150,48 +148,73 @@ def bucle_bot_segundo():
     except Exception as e:
         logger.error(f"Fallo critico: {e}")
 
-# --- ENTORNO WEB EXPANDIDO MASIVO ---
-app = Dash(__name__)
+# --- INTERFAZ WEB FLASK CRUDA (CERO ERRORES DE DASH) ---
+app = Flask(__name__)
 
-app.layout = html.Div(style={'backgroundColor': '#12161a', 'color': '#ffffff', 'fontFamily': 'sans-serif', 'padding': '15px', 'minHeight': '100vh'}, children=[
-    html.H2("⚡ OKX ARBITRAGE ULTRA PRO", style={'textAlign': 'center', 'color': '#eaecef', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '10px', 'margin': '0'}),
+@app.route('/')
+def home():
+    color_profit = "#02c076" if data_compartida['mejor_profit'] >= MIN_PROFIT else "#f84960"
     
-    # Bloque 1: Capital Formateado
-    html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '20px', 'marginTop': '15px', 'textAlign': 'center'}, children=[
-        html.Div("Capital Simulado Disponible", style={'color': '#848e9c', 'fontSize': '14px'}),
-        html.Div(id="live-capital", style={'color': '#02c076', 'fontSize': '36px', 'fontWeight': 'bold', 'marginTop': '5px'})
-    ]),
-    
-    # Bloque 2: Filtros básicos
-    html.Div(style={'display': 'flex', 'gap': '10px', 'marginTop': '15px'}, children=[
-        html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px', 'flex': '1', 'textAlign': 'center'}, children=[
-            html.Div("Spread Máximo", style={'color': '#848e9c', 'fontSize': '13px'}),
-            html.Div(id="live-profit", style={'fontSize': '20px', 'fontWeight': 'bold', 'marginTop': '5px'})
-        ]),
-        html.Div(style={'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px', 'flex': '1', 'textAlign': 'center'}, children=[
-            html.Div("Filtro Operación", style={'color': '#848e9c', 'fontSize': '13px'}),
-            html.Div(f"+{MIN_PROFIT}%", style={'color': '#f0b90b', 'fontSize': '20px', 'fontWeight': 'bold', 'marginTop': '5px'})
-        ])
-    ]),
+    # Plantilla HTML inyectada directamente como texto puro
+    html_template = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset='utf-8'>
+        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+        <title>OKX ARBITRAGE ULTRA PRO</title>
+        <meta http-equiv='refresh' content='1'>
+        <style>
+            body {{ background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }}
+            .card {{ background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }}
+            .grid {{ display: flex; gap: 10px; margin-top: 12px; }}
+            .col {{ flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }}
+            .label {{ color: #848e9c; font-size: 12px; }}
+            .value {{ font-size: 18px; font-weight: bold; margin-top: 4px; }}
+            .telemetria {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <h2 style='text-align:center;color:#eaecef;border-bottom:1px solid #2b3139;padding-bottom:10px;margin:0;'>⚡ OKX ARBITRAGE ULTRA PRO</h2>
+        
+        <div class='card' style='text-align:center;'>
+            <div class='label'>Capital Simulado Disponible</div>
+            <div style='color:#02c076;font-size:36px;font-weight:bold;margin-top:5px;'>${data_compartida['capital_actual']:.2f} USDT</div>
+        </div>
+        
+        <div class='grid'>
+            <div class='col'>
+                <div class='label'>Spread Máximo</div>
+                <div class='value' style='color:{color_profit};'>{data_compartida['mejor_profit']:.4f}%</div>
+            </div>
+            <div class='col'>
+                <div class='label'>Filtro Mínimo</div>
+                <div class='value' style='color:#f0b90b;'>+{MIN_PROFIT}%</div>
+            </div>
+        </div>
 
-    # NUEVO BLOQUE: TOP 3 RUTAS EN TIEMPO REAL
-    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
-        html.Div("🔥 Top 3 Caminos Más Rentables Libros OKX", style={'color': '#eaecef', 'fontSize': '14px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '6px', 'marginBottom': '10px'}),
-        html.Div(id="live-top-3-container")
-    ]),
+        <div class='card'>
+            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>🔥 Top 3 Caminos Más Rentables OKX</div>
+            {data_compartida['top_rutas_texto']}
+        </div>
 
-    # NUEVO BLOQUE: RENDIMIENTO DE LA SESIÓN (RÉCORDS)
-    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
-        html.Div("📊 Historial de Rangos de Profit (Sesión)", style={'color': '#eaecef', 'fontSize': '14px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '6px', 'marginBottom': '10px'}),
-        html.Div(style={'display': 'flex', 'justifyContent': 'space-between', 'fontSize': '13px'}, children=[
-            html.Div([html.Span("Mejor Spread Visto: ", style={'color': '#848e9c'}), html.Span(id="live-record-max", style={'fontWeight': 'bold', 'color': '#02c076'})]),
-            html.Div([html.Span("Peor Spread Visto: ", style={'color': '#848e9c'}), html.Span(id="live-record-min", style={'fontWeight': 'bold', 'color': '#f84960'})])
-        ])
-    ]),
+        <div class='card'>
+            <div class='label' style='margin-bottom:6px;font-weight:bold;color:#eaecef;'>📊 Historial de Rangos (Sesión)</div>
+            <div style='display:flex;justify-content:space-between;font-size:13px;'>
+                <div><span class='label'>Max Spread:</span> <span style='color:#02c076;font-weight:bold;'>{data_compartida['record_max_profit']:.4f}%</span></div>
+                <div><span class='label'>Min Spread:</span> <span style='color:#f84960;font-weight:bold;'>{data_compartida['record_min_profit']:.4f}%</span></div>
+            </div>
+        </div>
 
-    # Detalles Técnicos de Motor y Datos de Red
-    html.Div(style={'marginTop': '15px', 'backgroundColor': '#1e232a', 'borderRadius': '12px', 'padding': '15px'}, children=[
-        html.Div("⚙️ Telemetría del Sistema y Tráfico de Red", style={'color': '#eaecef', 'fontSize': '14px', 'fontWeight': 'bold', 'borderBottom': '1px solid #2b3139', 'paddingBottom': '6px', 'marginBottom': '10px'}),
-        html.Div(style={'display': 'grid', 'gridTemplateColumns': '1fr 1fr', 'gap': '10px', 'fontSize': '12px'}, children=[
-            html.Div([html.Span("Caminos Activos: ", style={'color': '#848e9c'}), html.Span(id="live-total-tri", style={'fontWeight': 'bold'})]),
-            html.Div([html.Span("Latencia API: ", style={'color': '#848e9c'}), html.Span(id="live-speed", style={'fontWeight': 'bold'})]),
+        <div class='card'>
+            <div class='label' style='margin-bottom:8px;font-weight:bold;color:#eaecef;'>⚙️ Telemetría y Tráfico de Red</div>
+            <div class='telemetria'>
+                <div><span class='label'>Rutas:</span> <b>{data_compartida['total_triangulos']:,}</b></div>
+                <div><span class='label'>Latencia:</span> <b>{data_compartida['tiempo_escaneo']:.2f}s</b></div>
+                <div><span class='label'>Petición:</span> <b>{data_compartida['tamano_peticion_kb']:.1f} KB</b></div>
+                <div><span class='label'>Total Red:</span> <b>{data_compartida['total_datos_mb']:.2f} MB</b></div>
+            </div>
+        </div>
+
+        <div class='card'>
+            <div class='label' style='border-bottom:1px solid #2b3139;padding-bottom:6px;margin-bottom:8px;font-weight:bold;color:#eaecef;'>📜 Registro de Operaciones Exitosas</div>
