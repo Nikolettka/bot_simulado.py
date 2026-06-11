@@ -4,8 +4,6 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OKX ARBITRAGE PRO</title>
-    <!-- Cargamos la librería para permitir transferencia de texto ultra ligero -->
-    <script src="https://socket.io"></script>
     <style>
         body { background-color: #12161a; color: #ffffff; font-family: sans-serif; padding: 12px; margin: 0; }
         .card { background-color: #1e232a; border-radius: 12px; padding: 15px; margin-top: 12px; }
@@ -13,20 +11,18 @@
         .col { flex: 1; background-color: #1e232a; border-radius: 12px; padding: 12px; text-align: center; }
         .label { color: #848e9c; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
         .value { font-size: 16px; font-weight: bold; margin-top: 4px; }
-        .btn { display: inline-block; color: white; padding: 10px 30px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-top: 10px; transition: background-color 0.2s; border: none; cursor: pointer; }
+        .btn { display: inline-block; color: white; padding: 10px 30px; border-radius: 8px; font-weight: bold; text-decoration: none; margin-top: 10px; border: none; cursor: pointer; }
     </style>
 </head>
 <body>
     <h2 style="text-align:center;color:#eaecef;border-bottom:1px solid #2b3139;padding-bottom:10px;margin:0;">⚡ OKX ARBITRAGE ULTRA PRO</h2>
     
-    <!-- INTERRUPTOR ASÍNCRONO -->
     <div class="card" style="text-align:center;">
         <div class="label">Estado del Sistema</div>
-        <div id="est_texto" style="font-size:15px; font-weight:bold; margin-top:5px;">Cargando...</div>
+        <div id="est_texto" style="font-size:15px; font-weight:bold; margin-top:5px;">Conectando...</div>
         <button id="btn_motor" class="btn" onclick="toggleMotor()">... MOTOR</button>
     </div>
 
-    <!-- BALANCE DETALLADO -->
     <div class="card" style="text-align:center;">
         <div class="label">Capital Simulado Disponible</div>
         <div id="capital" style="color:#02c076;font-size:34px;font-weight:bold;margin-top:3px;">$0.00 USDT</div>
@@ -81,10 +77,11 @@
     </div>
 
     <script>
-        // Inicializar conexión en tiempo real sin recarga de navegador
-        const socket = io();
+        // Escuchador nativo del flujo continuo enviado por Railway
+        const source = new EventSource("/stream");
 
-        socket.on('update_data', function(data) {
+        source.onmessage = function(event) {
+            const data = json.parse(event.data);
             document.getElementById('capital').innerHTML = data.capital;
             document.getElementById('neto').innerHTML = data.neto;
             document.getElementById('trades_count').innerHTML = data.trades;
@@ -103,7 +100,6 @@
             document.getElementById('trades_lista').innerHTML = data.trades_lista;
             document.getElementById('hora').innerHTML = data.hora;
             
-            // Estado del botón
             const btn = document.getElementById('btn_motor');
             btn.innerHTML = data.btn_texto + " MOTOR";
             btn.style.backgroundColor = data.btn_color;
@@ -111,10 +107,9 @@
             const est = document.getElementById('est_texto');
             est.innerHTML = data.est_texto;
             est.style.color = data.est_color;
-        });
+        };
 
         function toggleMotor() {
-            // Llama al servidor en segundo plano sin usar datos de recarga entera
             fetch('/toggle');
         }
     </script>
