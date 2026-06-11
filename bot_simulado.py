@@ -141,7 +141,7 @@ def ejecutar_bot():
                     logger.info("Esperando datos...")
             except Exception:
                 pass
-            time.sleep(0.8)
+            time.sleep(1.5)
     except Exception as e:
         logger.error(f"Fallo critico inicial: {e}")
 
