@@ -25,7 +25,7 @@ MODO_REAL = False
 
 # --- МАТЕМАТИЧЕСКА НАСТРОЙКА ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.02              # Нисък лимит за улавяне на бързи сделки
+MIN_PROFIT = 0.02              # Лимит от 0.02% за постоянни симулирани сделки
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
@@ -34,7 +34,6 @@ TOTAL_TRADES = 4
 DICCIONARIO_MERCADOS = {}
 
 def inicializar_okx():
-    """Инициализира чиста публична връзка без нужда от API ключове."""
     return ccxt.okx({'enableRateLimit': True})
 
 def buscar_todos_los_triangulos(markets):
@@ -42,16 +41,14 @@ def buscar_todos_los_triangulos(markets):
     DICCIONARIO_MERCADOS.clear()
     adjacencia = {}
     
-    # Филтрираме само ТОП 80 най-ликвидни пазара, за да не ни блокира OKX
-    contador = 0
     for symbol, market in markets.items():
         try:
             if not market.get('active', True): continue
             is_spot = market.get('spot', False)
             is_swap = market.get('swap', False)
             
-            if (is_spot or is_swap) and (market.get('quote') == 'USDT' or market.get('settle') == 'USDT'):
-                if contador > 80: break # Ограничение за стабилност
+            # Четем директно чистата структура на CCXT
+            if is_spot or is_swap:
                 base = market['base']
                 quote = market['quote']
                 
@@ -62,11 +59,10 @@ def buscar_todos_los_triangulos(markets):
                 }
                 adjacencia.setdefault(base, set()).add((quote, symbol))
                 adjacencia.setdefault(quote, set()).add((base, symbol))
-                contador += 1
         except Exception:
             continue
             
-    logger.info(f"Оптимизирани пазари за безключов достъп: {len(DICCIONARIO_MERCADOS)}")
+    logger.info(f"Успешно заредени пазари: {len(DICCIONARIO_MERCADOS)}")
     
     triangulos = []
     inicio = 'USDT'
@@ -92,6 +88,7 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 
     for i, par in enumerate(triangulo):
         ticker = tickers.get(par)
+        # Ако липсва цена за конкретния чист символ, прекратяваме калкулацията
         if not ticker or not ticker.get('ask') or not ticker.get('bid'): return -999.0, ""
         
         base = DICCIONARIO_MERCADOS[par]['base']
@@ -113,12 +110,12 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
-    logger.info("СТАРТИРАНЕ НА СВОБОДЕН БОТ БЕЗ API КЛЮЧОВЕ.")
+    logger.info("СТАРТИРАНЕ НА ХИБРИДЕН ПАЗАРЕН СКЕНЕР.")
     
     try:
         markets = exchange.load_markets()
         triangulos = buscar_todos_los_triangulos(markets)
-        logger.info(f"Заредена структура. Сканиране на {len(triangulos)} стабилни пътища.")
+        logger.info(f"Връзката е стабилна. Анализ на {len(triangulos)} триъгълни маршрута.")
         
         while True:
             try:
@@ -131,8 +128,8 @@ def ejecutar_bot():
                         resultados_vuelta.append((tri, texto, profit))
 
                 if resultados_vuelta:
-                    resultados_vuelta.sort(key=lambda x: x[2], reverse=True)
-                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta[0]
+                    resultados_vuelta.sort(key=lambda x: x, reverse=True)
+                    mejor_triangulo, mejor_ruta_texto, mejor_profit = resultados_vuelta
                     
                     if mejor_profit >= MIN_PROFIT:
                         TOTAL_TRADES += 1
@@ -142,10 +139,10 @@ def ejecutar_bot():
                     else:
                         logger.info(f"Сканиране... | Макс Спред: {mejor_profit:.4f}% | Цел: {MIN_PROFIT}%")
                 else:
-                    logger.info("Изчакване на ценови поток от OKX...")
+                    logger.info("Синхронизиране на ценовата матрица с OKX...")
             except Exception:
                 pass
-            time.sleep(2.5) # По-голяма пауза, за да не ни блокира публичния сървър
+            time.sleep(3.0) # Сигурна 3-секундна пауза за защита на безключовия достъп
     except Exception as e:
         logger.error(f"Критичен срив: {e}")
 
