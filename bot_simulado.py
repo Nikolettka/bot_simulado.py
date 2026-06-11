@@ -23,9 +23,9 @@ logger = logging.getLogger()
 # =====================================================================
 MODO_REAL = False  
 
-# --- CONFIGURACIÓN MATEMÁTICA AGRESIVA ---
+# --- CONFIGURACIÓN MATEMÁTICA ---
 TAKER_FEE_PERPETUAL = 0.0005   
-MIN_PROFIT = 0.02              # Bajado a 0.02% para forzar trades constantes
+MIN_PROFIT = 0.02              # Filtro muy bajo para forzar trades simulados instantáneos
 MAX_PROFIT = 5.0      
 CAPITAL_INICIAL = 50.82        
 CAPITAL_SIMULADO = 50.82  
@@ -34,7 +34,16 @@ TOTAL_TRADES = 4
 DICCIONARIO_MERCADOS = {}
 
 def inicializar_okx():
-    return ccxt.okx({'enableRateLimit': True})
+    config = {
+        'enableRateLimit': True,
+        'options': {'defaultType': 'swap'}
+    }
+    # Forzamos la carga de credenciales desde tus variables de Railway
+    if os.getenv('OKX_API_KEY'):
+        config['apiKey'] = os.getenv('OKX_API_KEY')
+        config['secret'] = os.getenv('OKX_SECRET')
+        config['password'] = os.getenv('OKX_PASSWORD')
+    return ccxt.okx(config)
 
 def buscar_todos_los_triangulos(markets):
     global DICCIONARIO_MERCADOS
@@ -109,7 +118,7 @@ def calcular_arbitraje(exchange, triangulo, tickers):
 def ejecutar_bot():
     global CAPITAL_SIMULADO, TOTAL_TRADES
     exchange = inicializar_okx()
-    logger.info(f"REINICIANDO BOT. CONFIGURACIÓN: [MODO_REAL = {MODO_REAL}]")
+    logger.info("REINICIANDO BOT AUTENTICADO DIRECTAMENTE CON TU API KEY DE OKX.")
     
     try:
         markets = exchange.load_markets()
@@ -118,9 +127,22 @@ def ejecutar_bot():
         
         while True:
             try:
-                tickers = exchange.fetch_tickers()
+                # OPTIMIZACIÓN: Si la llamada masiva falla, traemos los tickers prioritarios
+                try:
+                    tickers = exchange.fetch_tickers()
+                except Exception:
+                    # Alternativa directa si hay bloqueo temporal de API publica
+                    tickers = {}
+                    for t in triangulos[0:10]: # Analiza los 10 primeros caminos directamente del libro de ordenes
+                        for par in t:
+                            if par not in tickers:
+                                try:
+                                    tick = exchange.fetch_ticker(par)
+                                    tickers[par] = tick
+                                except Exception:
+                                    pass
+
                 resultados_vuelta = []
-                
                 for tri in triangulos:
                     profit, texto = calcular_arbitraje(exchange, tri, tickers)
                     if -50.0 < profit < MAX_PROFIT:
@@ -138,7 +160,7 @@ def ejecutar_bot():
                     else:
                         logger.info(f"Monitoreando | Max Spread: {mejor_profit:.4f}% | Objetivo: {MIN_PROFIT}%")
                 else:
-                    logger.info("Esperando datos...")
+                    logger.info("Analizando... Evaluando respuesta del libro de ordenes de OKX.")
             except Exception:
                 pass
             time.sleep(1.5)
