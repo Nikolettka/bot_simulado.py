@@ -215,4 +215,4 @@ def ejecutar_bot():
         logger.error(f"Fallo crítico inicial: {e}")
 
 if __name__ == "__main__":
-    ejecutar_bot()
+                            logger.info(f"Analizando... | Mejor Spread actual: {mejor_profit:.4f}% | Ruta: {mejor_ruta_texto}")
