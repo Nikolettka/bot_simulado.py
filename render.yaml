@@ -1,0 +1,16 @@
+services:
+  - type: worker          # worker = proceso background 24/7, NO se para
+    name: arbibot-okx
+    runtime: python
+    plan: free            # free tier de Render
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: DRY_RUN
+        value: "true"     # cambia a "false" cuando quieras live
+      - key: OKX_API_KEY
+        sync: false       # Render te pedirá el valor manualmente (seguro)
+      - key: OKX_SECRET
+        sync: false
+      - key: OKX_PASSPHRASE
+        sync: false
