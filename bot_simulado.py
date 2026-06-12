@@ -21,70 +21,58 @@ DRY_RUN        = os.environ.get("DRY_RUN", "true").strip().lower() != "false"
 # ─────────────────────────────────────────────
 #  PARÁMETROS DE TRADING
 # ─────────────────────────────────────────────
-TRADE_USDT        = 3.0        # capital por trade en USDT
-TAKER_FEE         = 0.0010     # 0.10% taker OKX
-MIN_PROFIT        = 0.31       # % mínimo neto para ejecutar
-MAX_PROFIT        = 5.0        # % máximo (filtro anti-stale)
-MAX_TICKER_AGE_MS = 10_000     # 10 s — ticker más viejo = ignorado
-SLEEP_SECONDS     = 2.0        # pausa entre ciclos (2s estable en Railway Trial)
+TRADE_USDT        = 3.0
+TAKER_FEE         = 0.0010
+MIN_PROFIT        = 0.31
+MAX_PROFIT        = 5.0
+MAX_TICKER_AGE_MS = 10_000
+SLEEP_SECONDS     = 3.0   # OPT-1: 3s en vez de 2s — ahorra ~33% CPU/crédito
 
-# Solo monedas bridge líquidas — reduce triángulos de ~5000 a ~200
-BRIDGE_COINS = {
-    "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX",
-    "MATIC", "DOT", "LTC", "AVAX", "LINK", "UNI", "ATOM",
-    "OKB", "TON", "NEAR", "FIL", "APT",
-}
+# OPT-2: Solo 10 bridges core — menos triángulos, menos RAM, mismas oportunidades reales
+BRIDGE_COINS = {"BTC", "ETH", "SOL", "XRP", "DOGE", "OKB", "LTC", "ADA", "AVAX", "TON"}
 
 # ─────────────────────────────────────────────
 #  ESTADO GLOBAL
 # ─────────────────────────────────────────────
-capital_simulado = TRADE_USDT * 10   # saldo virtual en dry-run
+capital_simulado = TRADE_USDT * 10
 total_trades     = 0
 total_profit_pct = 0.0
 
 
 # ══════════════════════════════════════════════
-#  INICIALIZACIÓN DEL EXCHANGE
+#  INICIALIZACIÓN
 # ══════════════════════════════════════════════
 def crear_exchange(autenticado: bool):
-    config = {
-        "enableRateLimit": True,
-        "options": {"defaultType": "spot"},
-    }
+    cfg = {"enableRateLimit": True, "options": {"defaultType": "spot"}}
     if autenticado:
-        config["apiKey"]     = OKX_API_KEY
-        config["secret"]     = OKX_SECRET
-        config["password"]   = OKX_PASSPHRASE
-    return ccxt.okx(config)
+        cfg["apiKey"]   = OKX_API_KEY
+        cfg["secret"]   = OKX_SECRET
+        cfg["password"] = OKX_PASSPHRASE
+    return ccxt.okx(cfg)
 
 
 # ══════════════════════════════════════════════
-#  CONSTRUCCIÓN DE TRIÁNGULOS
+#  CONSTRUCCIÓN DE TRIÁNGULOS + ÍNDICE DE PARES
 # ══════════════════════════════════════════════
 def buscar_triangulos(markets):
-    pares_spot = [
-        s for s, m in markets.items()
-        if m.get("spot") and m.get("active")
-    ]
+    """Devuelve (lista_triangulos, set_pares_necesarios)."""
+    pares_spot = [s for s, m in markets.items() if m.get("spot") and m.get("active")]
     por_moneda = {}
     for par in pares_spot:
-        base, quote = par.split("/")
-        por_moneda.setdefault(base,  []).append(par)
-        por_moneda.setdefault(quote, []).append(par)
+        b, q = par.split("/")
+        por_moneda.setdefault(b, []).append(par)
+        por_moneda.setdefault(q, []).append(par)
 
-    vistos = set()
-    inicio = "USDT"
-    if inicio not in por_moneda:
-        return []
-
+    vistos    = set()
     resultado = []
+    inicio    = "USDT"
+    if inicio not in por_moneda:
+        return [], set()
+
     for p1 in por_moneda[inicio]:
         b1, q1 = p1.split("/")
         m1 = b1 if q1 == inicio else q1
-        # Solo bridge coins líquidas — evita escanear miles de altcoins oscuras
-        if m1 not in BRIDGE_COINS:
-            continue
-        if m1 not in por_moneda:
+        if m1 not in BRIDGE_COINS or m1 not in por_moneda:
             continue
         for p2 in por_moneda[m1]:
             if p2 == p1:
@@ -100,16 +88,47 @@ def buscar_triangulos(markets):
                     if clave not in vistos:
                         vistos.add(clave)
                         resultado.append((p1, p2, p3))
-    return resultado
+
+    # OPT-3: índice de todos los pares que necesitamos — para fetch selectivo
+    pares_necesarios = set()
+    for tri in resultado:
+        pares_necesarios.update(tri)
+
+    return resultado, pares_necesarios
+
+
+# ══════════════════════════════════════════════
+#  FETCH SELECTIVO — solo los pares del triángulo
+# ══════════════════════════════════════════════
+def fetch_tickers_selectivo(exchange, pares):
+    """
+    OPT-3: En vez de fetch_tickers() (descarga ~600 pares),
+    descargamos solo los ~40 pares que usamos.
+    Ahorra ~93% de ancho de banda y RAM por ciclo.
+    """
+    result = {}
+    # ccxt permite pasar lista de symbols a fetch_tickers en OKX
+    try:
+        data = exchange.fetch_tickers(list(pares))
+        return data
+    except Exception:
+        # fallback: fetch uno a uno si el exchange no soporta lista
+        for par in pares:
+            try:
+                t = exchange.fetch_ticker(par)
+                result[par] = t
+            except Exception:
+                pass
+        return result
 
 
 # ══════════════════════════════════════════════
 #  CÁLCULO DE OPORTUNIDAD
 # ══════════════════════════════════════════════
 def calcular_profit(triangulo, tickers, now_ms):
-    monto        = 1.0
-    moneda       = "USDT"
-    ruta         = ["USDT"]
+    monto  = 1.0
+    moneda = "USDT"
+    ruta   = ["USDT"]
 
     for par in triangulo:
         tk = tickers.get(par)
@@ -143,12 +162,8 @@ def calcular_profit(triangulo, tickers, now_ms):
 #  EJECUCIÓN REAL DE LAS 3 ÓRDENES
 # ══════════════════════════════════════════════
 def ejecutar_triangulo(exchange, oportunidad):
-    """
-    Ejecuta las 3 órdenes de mercado en secuencia.
-    Devuelve (ok: bool, detalle: str).
-    """
-    triangulo = oportunidad["triangulo"]
-    tickers   = oportunidad["tickers"]
+    triangulo  = oportunidad["triangulo"]
+    tickers    = oportunidad["tickers"]
     monto_usdt = TRADE_USDT
     moneda     = "USDT"
     detalle    = []
@@ -156,45 +171,30 @@ def ejecutar_triangulo(exchange, oportunidad):
     for par in triangulo:
         tk          = tickers[par]
         base, quote = par.split("/")
-
         try:
             if moneda == quote:
-                # Comprar base pagando en quote (USDT o bridge coin)
-                # OKX market buy spot: amount = cantidad de BASE a comprar
                 cantidad_base = (monto_usdt / tk["ask"]) * (1 - TAKER_FEE)
-                orden = exchange.create_order(
-                    symbol = par,
-                    type   = "market",
-                    side   = "buy",
-                    amount = cantidad_base,
-                )
-                monto_usdt = cantidad_base   # ahora llevamos base
+                orden = exchange.create_order(par, "market", "buy", cantidad_base)
+                monto_usdt = cantidad_base
                 moneda     = base
             else:
-                # Vender base por quote
-                orden = exchange.create_order(
-                    symbol = par,
-                    type   = "market",
-                    side   = "sell",
-                    amount = monto_usdt,
-                )
-                # El filled cost es lo que recibimos en quote
-                filled     = float(orden.get("filled") or orden.get("amount") or monto_usdt)
-                price_avg  = float(orden.get("average") or tk["bid"])
-                monto_usdt = filled * price_avg * (1 - TAKER_FEE)
+                orden  = exchange.create_order(par, "market", "sell", monto_usdt)
+                filled = float(orden.get("filled") or orden.get("amount") or monto_usdt)
+                price  = float(orden.get("average") or tk["bid"])
+                monto_usdt = filled * price * (1 - TAKER_FEE)
                 moneda     = quote
 
             oid = orden.get("id", "?")
             detalle.append(f"{par} OK (id={oid})")
-            logger.info(f"  ✅ Orden {par} ejecutada → id={oid}")
+            logger.info(f"  ✅ {par} ejecutado → id={oid}")
 
         except Exception as e:
             detalle.append(f"{par} ERROR: {e}")
-            logger.error(f"  ❌ Orden {par} falló: {e}")
+            logger.error(f"  ❌ {par} falló: {e}")
             return False, " | ".join(detalle)
 
-    ganancia_usdt = monto_usdt - TRADE_USDT
-    return True, f"Ganancia estimada: ${ganancia_usdt:.4f} | {' | '.join(detalle)}"
+    ganancia = monto_usdt - TRADE_USDT
+    return True, f"Ganancia: ${ganancia:.4f} | {' | '.join(detalle)}"
 
 
 # ══════════════════════════════════════════════
@@ -204,45 +204,45 @@ def ejecutar_bot():
     global capital_simulado, total_trades, total_profit_pct
 
     modo = "🔵 DRY-RUN" if DRY_RUN else "🟢 LIVE"
-
-    # Exchange público para tickers/markets (sin claves)
-    exchange_pub = crear_exchange(autenticado=False)
-
-    # Exchange autenticado solo en live
+    exchange_pub  = crear_exchange(autenticado=False)
     exchange_live = None
+
     if not DRY_RUN:
         if not OKX_API_KEY or not OKX_SECRET or not OKX_PASSPHRASE:
-            logger.error("❌ Faltan variables OKX_API_KEY / OKX_SECRET / OKX_PASSPHRASE")
+            logger.error("❌ Faltan OKX_API_KEY / OKX_SECRET / OKX_PASSPHRASE")
             return
         exchange_live = crear_exchange(autenticado=True)
-        # Verificar credenciales
         try:
             balance = exchange_live.fetch_balance()
-            usdt_disponible = balance["free"].get("USDT", 0)
-            logger.info(f"✅ Autenticado en OKX | USDT disponible: ${usdt_disponible:.2f}")
-            if usdt_disponible < TRADE_USDT:
-                logger.error(f"❌ Saldo insuficiente: ${usdt_disponible:.2f} < ${TRADE_USDT} requerido")
+            usdt    = balance["free"].get("USDT", 0)
+            logger.info(f"✅ OKX autenticado | USDT libre: ${usdt:.2f}")
+            if usdt < TRADE_USDT:
+                logger.error(f"❌ Saldo insuficiente: ${usdt:.2f} < ${TRADE_USDT}")
                 return
         except Exception as e:
-            logger.error(f"❌ Error de autenticación OKX: {e}")
+            logger.error(f"❌ Auth OKX: {e}")
             return
 
-    logger.info(f"{'='*50}")
-    logger.info(f"  ARBIBOT OKX — Modo: {modo}")
-    logger.info(f"  Trade size: ${TRADE_USDT} | Min profit: {MIN_PROFIT}%")
-    logger.info(f"{'='*50}")
+    logger.info("=" * 50)
+    logger.info(f"  ARBIBOT OKX — {modo}")
+    logger.info(f"  Trade: ${TRADE_USDT} | Min: {MIN_PROFIT}% | Sleep: {SLEEP_SECONDS}s")
+    logger.info("=" * 50)
 
     try:
-        markets   = exchange_pub.load_markets()
-        triangulos = buscar_triangulos(markets)
-        logger.info(f"📐 {len(triangulos)} triángulos únicos cargados.")
+        markets              = exchange_pub.load_markets()
+        triangulos, pares_ok = buscar_triangulos(markets)
+        logger.info(f"📐 {len(triangulos)} triángulos | {len(pares_ok)} pares únicos")
+
+        # OPT-3: liberar markets de memoria — ya no se necesita
+        del markets
 
         while True:
             try:
-                tickers = exchange_pub.fetch_tickers()
+                # OPT-3: fetch selectivo — solo los pares que usamos
+                tickers = fetch_tickers_selectivo(exchange_pub, pares_ok)
                 now_ms  = exchange_pub.milliseconds()
 
-                mejores = []
+                mejores       = []
                 top_rechazado = None
 
                 for tri in triangulos:
@@ -268,35 +268,37 @@ def ejecutar_bot():
                         ganancia          = capital_simulado * (p / 100)
                         capital_simulado += ganancia
                         logger.info(
-                            f"💰 [DRY #{total_trades}] {ruta} | "
-                            f"+{p:.4f}% | Saldo virtual: ${capital_simulado:.2f} "
-                            f"| Total acumulado: {total_profit_pct:.4f}%"
+                            f"💰 [DRY #{total_trades}] {ruta} | +{p:.4f}% | "
+                            f"Saldo: ${capital_simulado:.2f} | Acum: {total_profit_pct:.4f}%"
                         )
                     else:
-                        logger.info(f"🚀 [LIVE #{total_trades}] Ejecutando {ruta} | +{p:.4f}%")
-                        ok, detalle = ejecutar_triangulo(exchange_live, mejor)
+                        logger.info(f"🚀 [LIVE #{total_trades}] {ruta} | +{p:.4f}%")
+                        ok, det = ejecutar_triangulo(exchange_live, mejor)
                         if ok:
-                            logger.info(f"✅ [LIVE #{total_trades}] {detalle}")
+                            logger.info(f"✅ [LIVE #{total_trades}] {det}")
                         else:
-                            logger.error(f"❌ [LIVE #{total_trades}] Fallo parcial: {detalle}")
-                            total_trades -= 1  # no contar como trade exitoso
+                            logger.error(f"❌ [LIVE #{total_trades}] {det}")
+                            total_trades -= 1
 
                 elif top_rechazado:
                     p    = top_rechazado["profit_pct"]
                     ruta = top_rechazado["ruta_texto"]
-                    saldo_txt = f"${capital_simulado:.2f}" if DRY_RUN else "live"
+                    saldo = f"${capital_simulado:.2f}" if DRY_RUN else "live"
                     logger.info(
                         f"❌ [RECHAZADO] {ruta} | {p:.4f}% | "
-                        f"Saldo: {saldo_txt} (Trades: {total_trades})"
+                        f"Saldo: {saldo} (Trades: {total_trades})"
                     )
 
+                # OPT-3: limpiar tickers de memoria después de usarlos
+                del tickers
+
             except ccxt.NetworkError as e:
-                logger.warning(f"⚠️  Red: {e} — reintentando en 3s")
-                time.sleep(3)
+                logger.warning(f"⚠️  Red: {e} — reintentando en 5s")
+                time.sleep(5)
             except ccxt.ExchangeError as e:
                 logger.error(f"⚠️  Exchange: {e}")
             except Exception as e:
-                logger.error(f"Error en ciclo: {e}")
+                logger.error(f"Error ciclo: {e}")
 
             time.sleep(SLEEP_SECONDS)
 
